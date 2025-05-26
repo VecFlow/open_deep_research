@@ -7,13 +7,16 @@ import aiohttp
 import httpx
 import time
 from typing import List, Optional, Dict, Any, Union, Literal
-from urllib.parse import unquote
+from urllib.parse import unquote, urlparse
 
 from exa_py import Exa
 from linkup import LinkupClient
 from tavily import AsyncTavilyClient
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents.aio import SearchClient as AsyncAzureAISearchClient
+import weaviate
+from weaviate import WeaviateAsyncClient
+import weaviate.auth
 import asyncio
 import os
 from duckduckgo_search import DDGS 
@@ -190,62 +193,121 @@ async def tavily_search_async(search_queries, max_results: int = 5, topic: Liter
 @traceable
 async def azureaisearch_search_async(search_queries: list[str], max_results: int = 5, topic: str = "general", include_raw_content: bool = True) -> list[dict]:
     """
-    Performs concurrent web searches using the Azure AI Search API.
+    Performs concurrent web searches using the Weaviate vector database.
 
     Args:
         search_queries (List[str]): list of search queries to process
         max_results (int): maximum number of results to return for each query
-        topic (str): semantic topic filter for the search.
-        include_raw_content (bool)
+        topic (str): semantic topic filter for the search (currently unused with Weaviate)
+        include_raw_content (bool): whether to include raw content in results
 
     Returns:
-        List[dict]: list of search responses from Azure AI Search API, one per query.
+        List[dict]: list of search responses from Weaviate, one per query.
     """
-    # configure and create the Azure Search client
-    # ensure all environment variables are set
-    if not all(var in os.environ for var in ["AZURE_AI_SEARCH_ENDPOINT", "AZURE_AI_SEARCH_INDEX_NAME", "AZURE_AI_SEARCH_API_KEY"]):
-        raise ValueError("Missing required environment variables for Azure Search API which are: AZURE_AI_SEARCH_ENDPOINT, AZURE_AI_SEARCH_INDEX_NAME, AZURE_AI_SEARCH_API_KEY")
-    endpoint = os.getenv("AZURE_AI_SEARCH_ENDPOINT")
-    index_name = os.getenv("AZURE_AI_SEARCH_INDEX_NAME")
-    credential = AzureKeyCredential(os.getenv("AZURE_AI_SEARCH_API_KEY"))
-
-    reranker_key = '@search.reranker_score'
-
-    async with AsyncAzureAISearchClient(endpoint, index_name, credential) as client:
+    # Configure and create the Weaviate client
+    # Ensure all environment variables are set
+    required_vars = ["WEAVIATE_URL", "WEAVIATE_API_KEY"]
+    if not all(var in os.environ for var in required_vars):
+        raise ValueError(f"Missing required environment variables for Weaviate which are: {', '.join(required_vars)}")
+    
+    weaviate_url = os.getenv("WEAVIATE_URL")
+    weaviate_api_key = os.getenv("WEAVIATE_API_KEY")
+    
+    # Get collection name from environment or use default
+    collection_name = os.getenv("WEAVIATE_COLLECTION_NAME", "Documents")
+    
+    # Get VoyageAI API key from environment
+    voyage_api_key = os.getenv('VOYAGEAI_APIKEY') or os.getenv('VOYAGE_APIKEY') or os.getenv('VOYAGE_API_KEY')
+    headers = {}
+    if voyage_api_key:
+        headers['X-VoyageAI-Api-Key'] = voyage_api_key
+    
+    # Parse the URL to extract host and port
+    parsed_url = urlparse(weaviate_url)
+    
+    # Determine if this is a Weaviate Cloud instance
+    is_weaviate_cloud = '.weaviate.cloud' in parsed_url.hostname or '.weaviate.network' in parsed_url.hostname
+    
+    if is_weaviate_cloud:
+        # For Weaviate Cloud, use the helper function
+        async_client = weaviate.use_async_with_weaviate_cloud(
+            cluster_url=weaviate_url,
+            auth_credentials=weaviate.auth.Auth.api_key(weaviate_api_key),
+            headers=headers
+        )
+    else:
+        # For custom instances, parse the URL components
+        http_host = parsed_url.hostname
+        http_port = parsed_url.port or (443 if parsed_url.scheme == 'https' else 8080)
+        http_secure = parsed_url.scheme == 'https'
+        
+        # For gRPC, assume standard port unless specified
+        grpc_port = 50051
+        grpc_secure = http_secure
+        
+        async_client = weaviate.use_async_with_custom(
+            http_host=http_host,
+            http_port=http_port,
+            http_secure=http_secure,
+            grpc_host=http_host,
+            grpc_port=grpc_port,
+            grpc_secure=grpc_secure,
+            auth_credentials=weaviate.auth.Auth.api_key(weaviate_api_key) if weaviate_api_key else None,
+            headers=headers
+        )
+    
+    async with async_client:
         async def do_search(query: str) -> dict:
-            # search query 
-            paged = await client.search(
-                search_text=query,
-                vector_queries=[{
-                    "fields": "vector",
-                    "kind": "text",
-                    "text": query,
-                    "exhaustive": True
-                }],
-                semantic_configuration_name="fraunhofer-rag-semantic-config",
-                query_type="semantic",
-                select=["url", "title", "chunk", "creationTime", "lastModifiedTime"],
-                top=max_results,
-            )
-            # async iterator to get all results
-            items = [doc async for doc in paged]
-            # Umwandlung in einfaches Dict-Format
-            results = [
-                {
-                    "title": doc.get("title"),
-                    "url": doc.get("url"),
-                    "content": doc.get("chunk"),
-                    "score": doc.get(reranker_key),
-                    "raw_content": doc.get("chunk") if include_raw_content else None
-                }
-                for doc in items
-            ]
-            return {"query": query, "results": results}
+            try:
+                # Get the collection
+                collection = async_client.collections.get(collection_name)
+                
+                # Perform hybrid search (combines vector and keyword search)
+                # You can adjust alpha: 0 = pure keyword search, 1 = pure vector search
+                response = await collection.query.hybrid(
+                    query=query,
+                    limit=max_results,
+                    alpha=0.7,  # Favors vector search
+                    return_metadata=['score', 'certainty'],
+                    # Specify properties based on Text_tables schema
+                    return_properties=['file_name', 'file_link', 'website_url', 'page_content', 'text', 'summary', 'source']
+                )
+                
+                # Convert Weaviate response to expected format
+                results = []
+                for obj in response.objects:
+                    # Get properties from the object
+                    properties = obj.properties
+                    
+                    # Map Text_tables properties to expected format
+                    # For title: use file_name or source
+                    title = properties.get("file_name", properties.get("source", ""))
+                    
+                    # For URL: prefer file_link, then website_url
+                    url = properties.get("file_link", properties.get("website_url", ""))
+                    
+                    # For content: prefer page_content, then text, then summary
+                    content = properties.get("page_content", properties.get("text", properties.get("summary", "")))
+                    
+                    # Build result dict matching expected format
+                    result_dict = {
+                        "title": title,
+                        "url": url,
+                        "content": content,
+                        "score": obj.metadata.score if hasattr(obj.metadata, 'score') else obj.metadata.certainty if hasattr(obj.metadata, 'certainty') else 0.0,
+                        "raw_content": content if include_raw_content else None
+                    }
+                    results.append(result_dict)
+                
+                return {"query": query, "results": results}
+                
+            except Exception as e:
+                print(f"Error searching Weaviate for query '{query}': {str(e)}")
+                return {"query": query, "results": [], "error": str(e)}
 
-        # parallelize the search queries
+        # Parallelize the search queries
         tasks = [do_search(q) for q in search_queries]
         return await asyncio.gather(*tasks)
-
 
 @traceable
 def perplexity_search(search_queries):
