@@ -19,6 +19,8 @@ DEFAULT_REPORT_STRUCTURE = """Use this structure to create a report on the user-
    - Aim for 1 structural element (either a list of table) that distills the main body sections 
    - Provide a concise summary of the report"""
 
+DEFAULT_LEGAL_ANALYSIS_STRUCTURE = """liability analysis, damages assessment, key witnesses, timeline of events, document evidence, deposition strategy"""
+
 class SearchAPI(Enum):
     PERPLEXITY = "perplexity"
     TAVILY = "tavily"
@@ -41,7 +43,7 @@ class Configuration:
     number_of_queries: int = 2 # Number of search queries to generate per iteration
     max_search_depth: int = 2 # Maximum number of reflection + search iterations
     planner_provider: str = "anthropic"  # Defaults to Anthropic as provider
-    planner_model: str = "claude-3-7-sonnet-latest" # Defaults to claude-3-7-sonnet-latest
+    planner_model: str = "claude-3-5-sonnet-latest" # Defaults to claude-3-5-sonnet-latest
     planner_model_kwargs: Optional[Dict[str, Any]] = None # kwargs for planner_model
     writer_provider: str = "anthropic" # Defaults to Anthropic as provider
     writer_model: str = "claude-3-5-sonnet-latest" # Defaults to claude-3-5-sonnet-latest
@@ -50,8 +52,14 @@ class Configuration:
     search_api_config: Optional[Dict[str, Any]] = None 
     
     # Multi-agent specific configuration
-    supervisor_model: str = "openai:gpt-4.1" # Model for supervisor agent in multi-agent setup
-    researcher_model: str = "openai:gpt-4.1" # Model for research agents in multi-agent setup 
+    supervisor_model: str = "openai:gpt-4o" # Model for supervisor agent in multi-agent setup
+    researcher_model: str = "openai:gpt-4o" # Model for research agents in multi-agent setup 
+    
+    # Legal-specific configuration
+    analysis_structure: str = DEFAULT_LEGAL_ANALYSIS_STRUCTURE # Structure for legal analysis
+    max_results_per_query: int = 10 # Maximum results per document search query
+    include_deposition_questions: bool = True # Whether to generate deposition questions
+    max_witnesses_for_deposition: int = 5 # Maximum number of witnesses to generate questions for
 
     @classmethod
     def from_runnable_config(

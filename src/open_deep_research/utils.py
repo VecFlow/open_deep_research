@@ -191,7 +191,7 @@ async def tavily_search_async(search_queries, max_results: int = 5, topic: Liter
     return search_docs
 
 @traceable
-async def azureaisearch_search_async(search_queries: list[str], max_results: int = 5, topic: str = "general", include_raw_content: bool = True) -> list[dict]:
+async def azureaisearch_search_async(search_queries: list[str], max_results: int = 100, topic: str = "general", include_raw_content: bool = True) -> list[dict]:
     """
     Performs concurrent web searches using the Weaviate vector database.
 
@@ -262,87 +262,110 @@ async def azureaisearch_search_async(search_queries: list[str], max_results: int
     
     async with async_client:
         async def do_search(query: str) -> dict:
-            try:
-                # Get the collection
-                collection = async_client.collections.get(collection_name)
-                
-                # Build filter for the hybrid search
-                filter_obj = None
-                if filters:
-                    # Import Weaviate filter classes
-                    import weaviate.classes as wvc
+            max_retries = 3
+            retry_delay = 1.0  # Start with 1 second delay
+            
+            for attempt in range(max_retries):
+                try:
+                    # Get the collection
+                    collection = async_client.collections.get(collection_name)
                     
-                    # Build filter conditions
-                    filter_conditions = []
-                    for prop_name, prop_value in filters.items():
-                        if isinstance(prop_value, list):
-                            # If value is a list, use contains_any
-                            filter_conditions.append(
-                                wvc.query.Filter.by_property(prop_name).contains_any(prop_value)
-                            )
+                    # Build filter for the hybrid search
+                    filter_obj = None
+                    if filters:
+                        # Import Weaviate filter classes
+                        import weaviate.classes as wvc
+                        
+                        # Build filter conditions
+                        filter_conditions = []
+                        for prop_name, prop_value in filters.items():
+                            if isinstance(prop_value, list):
+                                # If value is a list, use contains_any
+                                filter_conditions.append(
+                                    wvc.query.Filter.by_property(prop_name).contains_any(prop_value)
+                                )
+                            else:
+                                # For single values, use exact match
+                                filter_conditions.append(
+                                    wvc.query.Filter.by_property(prop_name).equal(prop_value)
+                                )
+                        
+                        # Combine all filters with AND logic
+                        if len(filter_conditions) == 1:
+                            filter_obj = filter_conditions[0]
                         else:
-                            # For single values, use exact match
-                            filter_conditions.append(
-                                wvc.query.Filter.by_property(prop_name).equal(prop_value)
-                            )
+                            # Chain filters with AND operator using &
+                            filter_obj = filter_conditions[0]
+                            for condition in filter_conditions[1:]:
+                                filter_obj = filter_obj & condition
                     
-                    # Combine all filters with AND logic
-                    if len(filter_conditions) == 1:
-                        filter_obj = filter_conditions[0]
-                    else:
-                        # Chain filters with AND operator using &
-                        filter_obj = filter_conditions[0]
-                        for condition in filter_conditions[1:]:
-                            filter_obj = filter_obj & condition
-                
-                # Perform hybrid search with filters
-                hybrid_kwargs = {
-                    "query": query,
-                    "limit": max_results,
-                    "alpha": 0.7,  # Favors vector search
-                }
-                
-                # Add filters if they were provided
-                if filter_obj:
-                    hybrid_kwargs["filters"] = filter_obj
-                
-                # Specify properties to return based on Text_tables schema
-                hybrid_kwargs["return_properties"] = ['file_name', 'file_link', 'website_url', 'page_content', 'text', 'summary', 'source', 'data_source_id']
-                
-                response = await collection.query.hybrid(**hybrid_kwargs)
-                
-                # Convert Weaviate response to expected format
-                results = []
-                for obj in response.objects:
-                    # Get properties from the object
-                    properties = obj.properties
-                    
-                    # Map Text_tables properties to expected format
-                    # For title: use file_name or source
-                    title = properties.get("file_name", properties.get("source", ""))
-                    
-                    # For URL: prefer file_link, then website_url
-                    url = properties.get("file_link", properties.get("website_url", ""))
-                    
-                    # For content: prefer page_content, then text, then summary
-                    content = properties.get("page_content", properties.get("text", properties.get("summary", "")))
-                    
-                    # Build result dict matching expected format
-                    result_dict = {
-                        "title": title,
-                        "url": url,
-                        "content": content,
-                        "score": obj.metadata.score if hasattr(obj.metadata, 'score') else 0.0,
-                        "raw_content": content if include_raw_content else None,
-                        "data_source_id": properties.get("data_source_id")  # Include data_source_id in results
+                    # Perform hybrid search with filters
+                    hybrid_kwargs = {
+                        "query": query,
+                        "limit": max_results,
+                        "alpha": 0.7,  # Favors vector search
                     }
-                    results.append(result_dict)
-                
-                return {"query": query, "results": results}
-                
-            except Exception as e:
-                print(f"Error searching Weaviate for query '{query}': {str(e)}")
-                return {"query": query, "results": [], "error": str(e)}
+                    
+                    # Add filters if they were provided
+                    if filter_obj:
+                        hybrid_kwargs["filters"] = filter_obj
+                    
+                    # Specify properties to return based on Text_tables schema
+                    hybrid_kwargs["return_properties"] = ['file_name', 'file_link', 'website_url', 'page_content', 'text', 'summary', 'source', 'data_source_id']
+                    
+                    # Add query complexity reduction for very long queries
+                    if len(query) > 500:  # If query is very long, truncate it
+                        query = query[:500] + "..."
+                        hybrid_kwargs["query"] = query
+                    
+                    # Execute query with timeout
+                    try:
+                        response = await asyncio.wait_for(
+                            collection.query.hybrid(**hybrid_kwargs),
+                            timeout=30.0  # 30 second timeout
+                        )
+                    except asyncio.TimeoutError:
+                        raise Exception("DEADLINE_EXCEEDED: Query timed out after 30 seconds")
+                    
+                    # Convert Weaviate response to expected format
+                    results = []
+                    for obj in response.objects:
+                        # Get properties from the object
+                        properties = obj.properties
+                        
+                        # Map Text_tables properties to expected format
+                        # For title: use file_name or source
+                        title = properties.get("file_name", properties.get("source", ""))
+                        
+                        # For URL: prefer file_link, then website_url
+                        url = properties.get("file_link", properties.get("website_url", ""))
+                        
+                        # For content: prefer page_content, then text, then summary
+                        content = properties.get("page_content", properties.get("text", properties.get("summary", "")))
+                        
+                        # Build result dict matching expected format
+                        result_dict = {
+                            "title": title,
+                            "url": url,
+                            "content": content,
+                            "score": obj.metadata.score if hasattr(obj.metadata, 'score') else 0.0,
+                            "raw_content": content if include_raw_content else None,
+                            "data_source_id": properties.get("data_source_id")  # Include data_source_id in results
+                        }
+                        results.append(result_dict)
+                    
+                    return {"query": query, "results": results}
+                    
+                except Exception as e:
+                    error_str = str(e)
+                    if "DEADLINE_EXCEEDED" in error_str and attempt < max_retries - 1:
+                        print(f"Deadline exceeded for query '{query[:50]}...', retrying in {retry_delay}s (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        print(f"Error searching Weaviate for query '{query}': {error_str}")
+                        return {"query": query, "results": [], "error": error_str}
 
         # Parallelize the search queries
         tasks = [do_search(q) for q in search_queries]
@@ -998,7 +1021,7 @@ async def linkup_search(search_queries, depth: Optional[str] = "standard"):
     return search_results
 
 @traceable
-async def google_search_async(search_queries: Union[str, List[str]], max_results: int = 5, include_raw_content: bool = True):
+async def google_search_async(search_queries: Union[str, List[str]], max_results: int = 100, include_raw_content: bool = True):
     """
     Performs concurrent web searches using Google.
     Uses Google Custom Search API if environment variables are set, otherwise falls back to web scraping.
@@ -1571,3 +1594,64 @@ async def select_and_execute_search(search_api: str, query_list: list[str], para
         return deduplicate_and_format_sources(search_results, max_tokens_per_source=4000)
     else:
         raise ValueError(f"Unsupported search API: {search_api}")
+
+# Legal document search functions
+
+async def search_documents_with_azure_ai(query_list: List[str], configurable) -> str:
+    """
+    Search legal documents using Azure AI Search (Weaviate).
+    Uses hardcoded filters configured in the Azure AI Search instance.
+    
+    Args:
+        query_list: List of search queries
+        configurable: Configuration object with search settings
+        
+    Returns:
+        Formatted string of search results
+    """
+    # Use existing azureaisearch_search_async function
+    # The filters are already configured in the Azure AI Search instance
+    search_results = await azureaisearch_search_async(
+        search_queries=query_list,
+        max_results=configurable.max_results_per_query or 10,
+        include_raw_content=True
+    )
+    
+    # Format results for legal analysis
+    formatted_results = "Document Search Results:\n\n"
+    for result in search_results:
+        formatted_results += f"Query: {result['query']}\n"
+        formatted_results += "="*80 + "\n"
+        
+        for doc in result['results']:
+            formatted_results += f"Document: {doc['title']}\n"
+            formatted_results += f"Source: {doc['url']}\n"
+            formatted_results += f"Relevance: {doc['score']}\n"
+            formatted_results += f"Content:\n{doc['content']}\n"
+            if doc.get('raw_content'):
+                # Limit raw content for legal docs
+                max_chars = 2000
+                raw = doc['raw_content'][:max_chars]
+                if len(doc['raw_content']) > max_chars:
+                    raw += "... [truncated]"
+                formatted_results += f"Full Text:\n{raw}\n"
+            formatted_results += "-"*80 + "\n\n"
+
+    print(f"formatted_results: {formatted_results}")
+            
+    return formatted_results
+
+def format_categories(categories: List[Any]) -> str:
+    """
+    Format completed legal analysis categories for use as context.
+    
+    Args:
+        categories: List of AnalysisCategory objects
+        
+    Returns:
+        Formatted string of categories
+    """
+    formatted = []
+    for category in categories:
+        formatted.append(f"### {category.name}\n\n{category.content}\n")
+    return "\n".join(formatted)
