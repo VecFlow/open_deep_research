@@ -204,6 +204,10 @@ async def azureaisearch_search_async(search_queries: list[str], max_results: int
     Returns:
         List[dict]: list of search responses from Weaviate, one per query.
     """
+    # Define filters inside the function
+    # You can modify this filters variable as needed
+    filters = {"data_source_id": "e89cb0a2-2187-489e-b942-9154faa7c3f0"}  # Example: {"data_source_id": "source123"} or {"data_source_id": ["source1", "source2"]}
+    
     # Configure and create the Weaviate client
     # Ensure all environment variables are set
     required_vars = ["WEAVIATE_URL", "WEAVIATE_API_KEY"]
@@ -262,16 +266,50 @@ async def azureaisearch_search_async(search_queries: list[str], max_results: int
                 # Get the collection
                 collection = async_client.collections.get(collection_name)
                 
-                # Perform hybrid search (combines vector and keyword search)
-                # You can adjust alpha: 0 = pure keyword search, 1 = pure vector search
-                response = await collection.query.hybrid(
-                    query=query,
-                    limit=max_results,
-                    alpha=0.7,  # Favors vector search
-                    return_metadata=['score', 'certainty'],
-                    # Specify properties based on Text_tables schema
-                    return_properties=['file_name', 'file_link', 'website_url', 'page_content', 'text', 'summary', 'source']
-                )
+                # Build filter for the hybrid search
+                filter_obj = None
+                if filters:
+                    # Import Weaviate filter classes
+                    import weaviate.classes as wvc
+                    
+                    # Build filter conditions
+                    filter_conditions = []
+                    for prop_name, prop_value in filters.items():
+                        if isinstance(prop_value, list):
+                            # If value is a list, use contains_any
+                            filter_conditions.append(
+                                wvc.query.Filter.by_property(prop_name).contains_any(prop_value)
+                            )
+                        else:
+                            # For single values, use exact match
+                            filter_conditions.append(
+                                wvc.query.Filter.by_property(prop_name).equal(prop_value)
+                            )
+                    
+                    # Combine all filters with AND logic
+                    if len(filter_conditions) == 1:
+                        filter_obj = filter_conditions[0]
+                    else:
+                        # Chain filters with AND operator using &
+                        filter_obj = filter_conditions[0]
+                        for condition in filter_conditions[1:]:
+                            filter_obj = filter_obj & condition
+                
+                # Perform hybrid search with filters
+                hybrid_kwargs = {
+                    "query": query,
+                    "limit": max_results,
+                    "alpha": 0.7,  # Favors vector search
+                }
+                
+                # Add filters if they were provided
+                if filter_obj:
+                    hybrid_kwargs["filters"] = filter_obj
+                
+                # Specify properties to return based on Text_tables schema
+                hybrid_kwargs["return_properties"] = ['file_name', 'file_link', 'website_url', 'page_content', 'text', 'summary', 'source', 'data_source_id']
+                
+                response = await collection.query.hybrid(**hybrid_kwargs)
                 
                 # Convert Weaviate response to expected format
                 results = []
@@ -294,8 +332,9 @@ async def azureaisearch_search_async(search_queries: list[str], max_results: int
                         "title": title,
                         "url": url,
                         "content": content,
-                        "score": obj.metadata.score if hasattr(obj.metadata, 'score') else obj.metadata.certainty if hasattr(obj.metadata, 'certainty') else 0.0,
-                        "raw_content": content if include_raw_content else None
+                        "score": obj.metadata.score if hasattr(obj.metadata, 'score') else 0.0,
+                        "raw_content": content if include_raw_content else None,
+                        "data_source_id": properties.get("data_source_id")  # Include data_source_id in results
                     }
                     results.append(result_dict)
                 
@@ -1471,6 +1510,8 @@ async def azureaisearch_search(queries: List[str], max_results: int = 5, topic: 
     for i, (url, result) in enumerate(unique_results.items()):
         formatted_output += f"\n\n--- SOURCE {i+1}: {result['title']} ---\n"
         formatted_output += f"URL: {url}\n\n"
+        if result.get('data_source_id'):
+            formatted_output += f"Data Source ID: {result['data_source_id']}\n"
         formatted_output += f"SUMMARY:\n{result['content']}\n\n"
         if result.get('raw_content'):
             formatted_output += f"FULL CONTENT:\n{result['raw_content'][:30000]}"  # Limit content size
