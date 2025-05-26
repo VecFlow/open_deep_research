@@ -23,19 +23,6 @@ def format_document_content(content: str, max_length: Optional[int] = None) -> s
     return content
 
 
-def validate_document_ids(doc_ids: List[str]) -> bool:
-    """Validate that document IDs are properly formatted.
-
-    Args:
-        doc_ids: List of document IDs to validate
-
-    Returns:
-        True if all IDs are valid, False otherwise
-    """
-    # TODO: Implement actual validation logic
-    return all(isinstance(doc_id, str) and len(doc_id) > 0 for doc_id in doc_ids)
-
-
 def extract_document_metadata(content: str) -> Dict[str, Any]:
     """Extract metadata from document content.
 
@@ -51,20 +38,6 @@ def extract_document_metadata(content: str) -> Dict[str, Any]:
         "word_count": len(content.split()) if content else 0,
         "has_content": bool(content.strip()),
     }
-
-
-async def retrieve_document(doc_id: str, api_config: Dict[str, Any]) -> str:
-    """Retrieve document content by ID.
-
-    Args:
-        doc_id: Document identifier
-        api_config: API configuration for document retrieval
-
-    Returns:
-        Document content as string
-    """
-    # TODO: Implement actual document retrieval
-    return f"[PLACEHOLDER: Content for document {doc_id}]"
 
 
 def compare_documents(base_content: str, reference_content: str) -> Dict[str, Any]:

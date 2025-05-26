@@ -4,8 +4,33 @@ from typing import Dict, Any, List
 from langchain_core.runnables import RunnableConfig
 
 from src.redline.state import RedlineState
-from src.redline.configuration import Configuration
-from src.redline.utils import retrieve_document, validate_document_ids
+
+
+async def retrieve_document(doc_id: str) -> str:
+    """Retrieve document content by ID.
+
+    Args:
+        doc_id: Document identifier
+        api_config: API configuration for document retrieval
+
+    Returns:
+        Document content as string
+    """
+    # TODO: Implement actual document retrieval
+    return f"[PLACEHOLDER: Content for document {doc_id}]"
+
+
+def validate_document_ids(doc_ids: List[str]) -> bool:
+    """Validate that document IDs are properly formatted.
+
+    Args:
+        doc_ids: List of document IDs to validate
+
+    Returns:
+        True if all IDs are valid, False otherwise
+    """
+    # TODO: Implement actual validation logic
+    return all(isinstance(doc_id, str) and len(doc_id) > 0 for doc_id in doc_ids)
 
 
 async def retrieve_documents(
@@ -32,10 +57,6 @@ async def retrieve_documents(
     doc_id = state["doc_id"]
     reference_doc_ids = state["reference_doc_ids"]
 
-    # Get configuration
-    configurable = Configuration.from_runnable_config(config)
-    document_api_config = configurable.document_api_config or {}
-
     # Validate document IDs
     all_doc_ids = [doc_id] + reference_doc_ids
     if not validate_document_ids(all_doc_ids):
@@ -48,7 +69,7 @@ async def retrieve_documents(
 
     # Retrieve base document content
     try:
-        base_document_content = await retrieve_document(doc_id, document_api_config)
+        base_document_content = await retrieve_document(doc_id)
         print(f"✅ Retrieved base document ({len(base_document_content)} characters)")
     except Exception as e:
         print(f"❌ Failed to retrieve base document {doc_id}: {e}")
@@ -58,7 +79,7 @@ async def retrieve_documents(
     reference_documents_content: List[str] = []
     for ref_id in reference_doc_ids:
         try:
-            ref_content = await retrieve_document(ref_id, document_api_config)
+            ref_content = await retrieve_document(ref_id)
             reference_documents_content.append(ref_content)
             print(
                 f"✅ Retrieved reference document {ref_id} ({len(ref_content)} characters)"

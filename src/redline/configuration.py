@@ -18,14 +18,6 @@ class Configuration(BaseModel):
         Field(description="Additional model kwargs for planner"),
     ] = {}
 
-    # Document retrieval configuration
-    document_api: Annotated[
-        Optional[str], Field(description="API to use for document retrieval")
-    ] = None
-    document_api_config: Annotated[
-        Optional[Dict[str, Any]], Field(description="Configuration for document API")
-    ] = {}
-
     # Redline task configuration
     max_clarification_questions: Annotated[
         Optional[int], Field(description="Maximum number of clarification questions")
