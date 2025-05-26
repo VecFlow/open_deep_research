@@ -1,6 +1,18 @@
 """Utility functions for the redline system."""
 
+import warnings
 from typing import List, Dict, Any, Optional
+
+
+def suppress_langchain_warnings():
+    """Suppress known deprecation warnings from LangChain dependencies."""
+    # Suppress Pydantic deprecation warnings from LangChain
+    warnings.filterwarnings(
+        "ignore",
+        category=DeprecationWarning,
+        message=".*The `schema` method is deprecated.*",
+    )
+    warnings.filterwarnings("ignore", category=DeprecationWarning, module="pydantic")
 
 
 def get_config_value(value: Any, default: Any = None) -> Any:
@@ -37,22 +49,4 @@ def extract_document_metadata(content: str) -> Dict[str, Any]:
         "length": len(content),
         "word_count": len(content.split()) if content else 0,
         "has_content": bool(content.strip()),
-    }
-
-
-def compare_documents(base_content: str, reference_content: str) -> Dict[str, Any]:
-    """Compare two documents and return differences.
-
-    Args:
-        base_content: Content of the base document
-        reference_content: Content of the reference document
-
-    Returns:
-        Dictionary with comparison results
-    """
-    # TODO: Implement document comparison logic
-    return {
-        "length_diff": len(base_content) - len(reference_content),
-        "word_count_diff": len(base_content.split()) - len(reference_content.split()),
-        "similarity_score": 0.0,  # Placeholder
     }

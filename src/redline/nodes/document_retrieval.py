@@ -1,36 +1,46 @@
 """Document retrieval node for getting raw text from documents."""
 
+import pickle
 from typing import Dict, Any, List
+import boto3
 from langchain_core.runnables import RunnableConfig
 
 from src.redline.state import RedlineState
+from src.redline.configuration import Configuration
+
+# Initialize S3 client
+s3_client = boto3.client("s3")
 
 
-async def retrieve_document(doc_id: str) -> str:
-    """Retrieve document content by ID.
+async def retrieve_document(doc_id: str, bucket_name: str = None) -> str:
+    """Retrieve document content by ID and return full text.
 
     Args:
         doc_id: Document identifier
-        api_config: API configuration for document retrieval
+        bucket_name: S3 bucket name for document retrieval
 
     Returns:
         Document content as string
     """
-    # TODO: Implement actual document retrieval
-    return f"[PLACEHOLDER: Content for document {doc_id}]"
+    try:
+        # Try pickled documents first
+        object_key = f"{doc_id}_serialized_data.pkl"
 
+        try:
+            obj = s3_client.get_object(Bucket=bucket_name, Key=object_key)
+            body = obj["Body"].read()
+            docs = pickle.loads(body)
+            # Get full text from documents
+            return "".join([doc.page_content for doc in docs])
+        except Exception:
+            # Fallback to plain text
+            object_key = f"{doc_id}_processed.txt"
+            obj = s3_client.get_object(Bucket=bucket_name, Key=object_key)
+            body = obj["Body"].read()
+            return body.decode("utf-8")
 
-def validate_document_ids(doc_ids: List[str]) -> bool:
-    """Validate that document IDs are properly formatted.
-
-    Args:
-        doc_ids: List of document IDs to validate
-
-    Returns:
-        True if all IDs are valid, False otherwise
-    """
-    # TODO: Implement actual validation logic
-    return all(isinstance(doc_id, str) and len(doc_id) > 0 for doc_id in doc_ids)
+    except Exception as e:
+        return f"[ERROR: Could not retrieve document {doc_id}: {e}]"
 
 
 async def retrieve_documents(
@@ -57,19 +67,13 @@ async def retrieve_documents(
     doc_id = state["doc_id"]
     reference_doc_ids = state["reference_doc_ids"]
 
-    # Validate document IDs
-    all_doc_ids = [doc_id] + reference_doc_ids
-    if not validate_document_ids(all_doc_ids):
-        raise ValueError("Invalid document IDs provided")
-
-    print(f"📄 Retrieving base document: {doc_id}")
-    print(
-        f"📚 Retrieving {len(reference_doc_ids)} reference documents: {', '.join(reference_doc_ids)}"
-    )
+    # Get S3 bucket name from configuration
+    configuration = Configuration.from_runnable_config(config)
+    bucket_name = configuration.s3_bucket_name
 
     # Retrieve base document content
     try:
-        base_document_content = await retrieve_document(doc_id)
+        base_document_content = await retrieve_document(doc_id, bucket_name)
         print(f"✅ Retrieved base document ({len(base_document_content)} characters)")
     except Exception as e:
         print(f"❌ Failed to retrieve base document {doc_id}: {e}")
@@ -79,7 +83,7 @@ async def retrieve_documents(
     reference_documents_content: List[str] = []
     for ref_id in reference_doc_ids:
         try:
-            ref_content = await retrieve_document(ref_id)
+            ref_content = await retrieve_document(ref_id, bucket_name)
             reference_documents_content.append(ref_content)
             print(
                 f"✅ Retrieved reference document {ref_id} ({len(ref_content)} characters)"

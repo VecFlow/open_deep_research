@@ -12,12 +12,15 @@ from src.redline.state import (
     ClarificationQuestion,
 )
 from src.redline.configuration import Configuration
+from src.redline.utils import suppress_langchain_warnings
 from src.redline.nodes import (
     retrieve_documents,
     generate_redline_plan,
     collect_user_feedback,
 )
 
+# Suppress LangChain deprecation warnings
+suppress_langchain_warnings()
 
 # Build the graph
 builder = StateGraph(

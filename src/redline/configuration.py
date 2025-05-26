@@ -26,6 +26,11 @@ class Configuration(BaseModel):
         Optional[str], Field(description="Level of detail for redline plan")
     ] = "detailed"
 
+    # Document retrieval configuration
+    s3_bucket_name: Annotated[
+        Optional[str], Field(description="S3 bucket name for document storage")
+    ] = "ross-full-doc-texts"
+
     @classmethod
     def from_runnable_config(cls, config: RunnableConfig) -> "Configuration":
         """Create Configuration from RunnableConfig."""
