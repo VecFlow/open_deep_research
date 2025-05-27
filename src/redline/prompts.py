@@ -47,3 +47,21 @@ Your thoughtful clarification questions should address:
 2. The most pertinent content from the reference documents to consider
 3. Any specific content preferences for the redlined output
 """
+
+structured_feedback_prompt_template = """
+🎯 GENERATED REDLINE PLAN:
+{redline_plan}
+
+❓ CLARIFICATION QUESTIONS:
+{questions_str}
+
+---
+
+Required:
+- approval: boolean (true to approve, false to request changes)
+
+Optional:
+- specific_feedback: string with your comments or suggestions
+- answer_to_clarification_questions: list of tuples with (question_number, answer)
+
+Your feedback:"""
