@@ -109,7 +109,6 @@ def _format_answered_questions(
 async def _invoke_planner_model(
     planner_model: Any,
     prompt: str,
-    operation_type: str,
 ) -> Tuple[str, List[str]]:
     """Invoke the planner model and return plan content and questions."""
     structured_planner_model = planner_model.with_structured_output(RedlinePlanOutput)
@@ -125,13 +124,11 @@ async def _invoke_planner_model(
         plan_content = response.plan
         questions_list = response.clarification_questions
 
-        print(
-            f"✅ Generated {operation_type} redline plan ({len(plan_content)} characters)"
-        )
+        print(f"✅ Generated redline plan ({len(plan_content)} characters)")
         return plan_content, questions_list
 
     except Exception as e:
-        print(f"❌ Failed to generate {operation_type} plan with LLM: {e}")
+        print(f"❌ Failed to generate plan with LLM: {e}")
         raise e
 
 
@@ -197,7 +194,7 @@ async def generate_redline_plan(
 
     # Generate the plan using the LLM
     plan_content, questions_list = await _invoke_planner_model(
-        planner_model, planning_prompt, "initial", planner_provider, planner_model_name
+        planner_model, planning_prompt
     )
 
     # Convert string questions to ClarificationQuestion objects
@@ -261,7 +258,7 @@ async def _generate_revised_plan(
 
     # Generate the revised plan
     plan_content, questions_list = await _invoke_planner_model(
-        planner_model, revision_prompt, "revised", planner_provider, planner_model_name
+        planner_model, revision_prompt
     )
 
     # Convert string questions to ClarificationQuestion objects

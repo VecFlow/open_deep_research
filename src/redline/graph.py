@@ -38,7 +38,8 @@ builder.add_node("collect_user_feedback", collect_user_feedback)
 
 def route_after_feedback(state: RedlineState):
     """Route after user feedback - either end or regenerate plan."""
-    if state.get("structured_feedback", {}).get("approval", False):
+    structured_feedback = state.get("structured_feedback")
+    if structured_feedback and structured_feedback.approval:
         return END
     else:
         return "generate_redline_plan"
