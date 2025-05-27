@@ -9,7 +9,8 @@ from src.redline.state import RedlineState, ClarificationQuestion
 from src.redline.configuration import Configuration
 from src.redline.prompts import (
     redline_planner_instructions,
-    clarification_questions_instructions,
+    planning_prompt_template,
+    reference_doc_summary_template,
 )
 from src.redline.utils import get_config_value
 
@@ -58,38 +59,32 @@ async def generate_redline_plan(
 
     print(f"🧠 Generating redline plan using {planner_provider}/{planner_model_name}")
 
-    # Format reference documents with their comments
+    # Format reference documents with their comments using template
     reference_docs_summary = []
     for i, (ref_id, ref_content, ref_comment) in enumerate(
         zip(
             reference_doc_ids, reference_documents_content, reference_documents_comments
         )
     ):
-        ref_summary = f"""
-Reference Document {i+1}: {ref_id}
-Comment: {ref_comment}
-Content Preview: {ref_content[:500]}{'...' if len(ref_content) > 500 else ''}
-"""
+        ref_summary = reference_doc_summary_template.format(
+            doc_number=i + 1,
+            ref_id=ref_id,
+            ref_comment=ref_comment,
+            ref_content=ref_content,
+        )
         reference_docs_summary.append(ref_summary)
 
     reference_docs_str = "\n".join(reference_docs_summary)
 
-    # Create the planning prompt
-    planning_prompt = f"""
-{redline_planner_instructions}
-
-TASK DETAILS:
-Base Document ID: {doc_id}
-Base Document Content: {base_document_content[:1000]}{'...' if len(base_document_content) > 1000 else ''}
-
-General Instructions: {general_comments}
-
-{reference_docs_str}
-
-Please provide:
-1. A detailed redline plan
-2. Exactly {max_questions} clarification questions
-"""
+    # Create the planning prompt using template
+    planning_prompt = planning_prompt_template.format(
+        redline_planner_instructions=redline_planner_instructions,
+        doc_id=doc_id,
+        base_document_content=base_document_content,
+        general_comments=general_comments,
+        reference_docs_str=reference_docs_str,
+        max_questions=max_questions,
+    )
 
     # Generate the plan using the LLM
     try:
@@ -107,41 +102,11 @@ Please provide:
 
     except Exception as e:
         print(f"❌ Failed to generate plan with LLM: {e}")
-        plan_content = f"""
-REDLINE PLAN (FALLBACK):
+        raise e
 
-Base Document: {doc_id}
-Reference Documents: {', '.join(reference_doc_ids)}
-General Comments: {general_comments}
-
-1. Document Analysis Phase:
-   - Compare base document structure with reference documents
-   - Identify key differences in content, format, and style
-   - Focus on areas mentioned in general comments
-
-2. Redlining Approach:
-   - Systematic review section by section
-   - Incorporate feedback from reference document comments
-   - Track changes and provide rationale for each modification
-
-3. Implementation Strategy:
-   - Prioritize changes based on general comments
-   - Ensure consistency with reference materials
-   - Maintain document integrity and readability
-"""
-
-    # Generate clarification questions
-    clarification_questions = [
-        ClarificationQuestion(
-            question="What is the primary goal of this redlining task - compliance alignment, content improvement, or stylistic consistency?"
-        ),
-        ClarificationQuestion(
-            question="Should certain reference documents be prioritized over others when conflicts arise?"
-        ),
-        ClarificationQuestion(
-            question="Are there specific sections or types of content that require special attention during the redlining process?"
-        ),
-    ]
+    # TODO: Parse clarification questions from LLM response
+    # For now, return empty list since we removed default questions
+    clarification_questions = []
 
     print(f"❓ Generated {len(clarification_questions)} clarification questions")
 
