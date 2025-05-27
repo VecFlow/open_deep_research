@@ -179,6 +179,56 @@ REFERENCE DOCUMENTS:
 Please generate structured redline suggestions following the exact format specified in the system prompt. Focus on implementing the approved redline plan with precise edits."""
 
 ######################################################
+#           Refinement prompts                       #
+######################################################
+
+refinement_prompt_template = """This is a REFINEMENT ITERATION (iteration {current_iteration} of max {max_iterations}) to review previously generated redline suggestions and determine if any additional edits should be made.
+
+You have been given:
+1. A redline plan outlining the editing approach
+2. The base document content  
+3. Reference documents for guidance
+4. Previously generated redline suggestions
+
+Your task is to review all the information and determine if there are any additional redline suggestions that should be made to improve the document further. Consider:
+
+- Are there any important edits that were missed in the initial suggestions?
+- Are there any inconsistencies that need to be addressed?
+- Are there any additional improvements that could be made based on the reference documents?
+- Are there any legal or structural improvements that could enhance the document?
+
+**CRITICAL: You must return structured output with:**
+1. **more_edits**: boolean indicating if there are additional edits to suggest
+2. **suggestions**: RedlineSuggestions object containing any additional suggestions
+
+**IMPORTANT REFINEMENT RULES:**
+- Only suggest edits that are NOT already covered by the existing suggestions
+- Do not repeat suggestions that have already been made
+- Do not propose overlapping edits with existing suggestions
+- If you determine that no additional edits are needed, set more_edits to false and provide an empty suggestions object
+
+---
+
+APPROVED REDLINE PLAN:
+{redline_plan}
+
+BASE DOCUMENT:
+{base_document_content}
+
+REFERENCE DOCUMENTS:
+{reference_documents_content}
+
+PREVIOUSLY GENERATED SUGGESTIONS:
+Individual Suggestions: {num_individual_suggestions}
+Replace-All Suggestions: {num_replace_all_suggestions}
+
+---
+
+Review the above information carefully and determine if there are any additional edits that should be made to improve the document further. Consider whether the existing suggestions fully implement the redline plan and whether there are any missed opportunities for improvement based on the reference documents.
+
+If you identify additional suggestions, provide them in the structured format. If you believe the existing suggestions are comprehensive and no additional edits are needed, set more_edits to false."""
+
+######################################################
 #                 General prompts                    #
 ######################################################
 

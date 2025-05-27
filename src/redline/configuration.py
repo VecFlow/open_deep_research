@@ -25,6 +25,12 @@ class Configuration(BaseModel):
     plan_detail_level: Annotated[
         Optional[str], Field(description="Level of detail for redline plan")
     ] = "detailed"
+    max_refinement_iterations: Annotated[
+        Optional[int],
+        Field(
+            description="Maximum number of refinement iterations for redline suggestions"
+        ),
+    ] = 3
 
     # Document retrieval configuration
     s3_bucket_name: Annotated[

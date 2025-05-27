@@ -31,8 +31,8 @@ class RedlinePlanOutput(BaseModel):
     )
     clarification_questions: List[str] = Field(
         description="A list of clarifying questions that must be answered before proceeding with the redline. Each question should be clear, actionable, and help improve the quality of the final redlined document.",
-        max_items=3,
-        min_items=1,
+        max_length=3,
+        min_length=1,
     )
 
 

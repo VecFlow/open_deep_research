@@ -7,6 +7,7 @@ from src.redline.state import (
     RedlineStateOutput,
     ClarificationQuestion,
     StructuredFeedback,
+    RefinementOutput,
 )
 from src.redline.configuration import Configuration
 
@@ -17,5 +18,6 @@ __all__ = [
     "RedlineStateOutput",
     "ClarificationQuestion",
     "StructuredFeedback",
+    "RefinementOutput",
     "Configuration",
 ]

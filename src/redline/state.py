@@ -58,6 +58,15 @@ class RedlineSuggestions(BaseModel):
     )
 
 
+class RefinementOutput(BaseModel):
+    """Structured output for refinement iterations."""
+
+    more_edits: bool = Field(description="Whether there are more edits to be made")
+    suggestions: RedlineSuggestions = Field(
+        description="Additional redline suggestions to be combined with existing ones"
+    )
+
+
 class RedlineStateInput(TypedDict):
     doc_id: str  # Base document ID
     reference_doc_ids: List[str]  # List of reference document IDs
@@ -89,3 +98,10 @@ class RedlineState(TypedDict):
     redline_plan: str  # Plan for the redline task
     clarification_questions: List[ClarificationQuestion]
     redline_suggestions: Optional[RedlineSuggestions]  # Generated redline suggestions
+
+    # Refinement tracking fields
+    refinement_iteration: Optional[int]  # Current refinement iteration count
+    previous_redline_plan: Optional[str]  # Previous plan for revision
+    more_refinement_needed: Optional[
+        bool
+    ]  # Whether more refinement iterations are needed

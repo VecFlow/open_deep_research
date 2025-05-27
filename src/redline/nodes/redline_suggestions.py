@@ -74,6 +74,7 @@ async def generate_redline_suggestions(
 
         return {
             "redline_suggestions": response,
+            "refinement_iteration": 0,  # Initialize refinement iteration counter
         }
 
     except Exception as e:
