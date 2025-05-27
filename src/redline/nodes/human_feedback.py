@@ -52,9 +52,13 @@ def collect_user_feedback(
     # Create structured feedback object
     structured_feedback = StructuredFeedback(**feedback)
 
-    # Save structured feedback to state
-    return {
-        "user_approved": structured_feedback.approval,
+    # Prepare return data
+    return_data = {
         "structured_feedback": structured_feedback,
-        "clarification_answers": structured_feedback.answer_to_clarification_questions,
     }
+    
+    # If feedback is not approved, store the current plan as previous plan for revision
+    if not structured_feedback.approval:
+        return_data["previous_redline_plan"] = redline_plan
+
+    return return_data

@@ -45,11 +45,7 @@ class RedlineState(TypedDict):
     # Working fields (can be added as the graph evolves)
     base_document_content: str  # Content of the base document
     reference_documents_content: List[str]  # Content of reference documents
-    user_approved: bool  # Whether user approved the plan
     structured_feedback: Optional[StructuredFeedback]  # Structured feedback from user
-    clarification_answers: Optional[
-        List[Tuple[int, str]]
-    ]  # Answers to clarification questions
 
     # Output fields
     redline_plan: str  # Plan for the redline task

@@ -1,6 +1,6 @@
 """Plan generation node for creating redline plans and clarification questions."""
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple, Optional
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -11,9 +11,16 @@ from src.redline.configuration import Configuration
 from src.redline.prompts import (
     redline_planner_instructions,
     planning_prompt_template,
+    planning_revision_prompt_template,
     reference_doc_summary_template,
 )
 from src.redline.utils import get_config_value
+
+
+def is_plan_revision(state: RedlineState) -> bool:
+    """Check if this is a plan revision (feedback exists and approval is false)."""
+    feedback = state.get("structured_feedback")
+    return feedback is not None and not feedback.approval
 
 
 class RedlinePlanOutput(BaseModel):
@@ -27,6 +34,116 @@ class RedlinePlanOutput(BaseModel):
         max_items=3,
         min_items=1,
     )
+
+
+def _extract_state_data(state: RedlineState) -> Dict[str, Any]:
+    """Extract common data from state that's used by both plan generation functions."""
+    return {
+        "doc_id": state["doc_id"],
+        "reference_doc_ids": state["reference_doc_ids"],
+        "general_comments": state["general_comments"],
+        "reference_documents_comments": state["reference_documents_comments"],
+        "base_document_content": state["base_document_content"],
+        "reference_documents_content": state["reference_documents_content"],
+    }
+
+
+def _configure_planner_model(config: RunnableConfig) -> Tuple[Any, int]:
+    """Set up the planner model and return it along with max_questions."""
+    configurable = Configuration.from_runnable_config(config)
+
+    planner_provider = get_config_value(configurable.planner_provider, "openai")
+    planner_model_name = get_config_value(configurable.planner_model, "gpt-4o-mini")
+    planner_model_kwargs = get_config_value(configurable.planner_model_kwargs, {})
+    max_questions = get_config_value(configurable.max_clarification_questions, 3)
+
+    planner_model = init_chat_model(
+        model=planner_model_name,
+        model_provider=planner_provider,
+        model_kwargs=planner_model_kwargs,
+    )
+
+    return planner_model, max_questions, planner_provider, planner_model_name
+
+
+def _format_reference_documents(
+    reference_doc_ids: List[str],
+    reference_documents_content: List[str],
+    reference_documents_comments: List[str],
+) -> str:
+    """Format reference documents with their comments using template."""
+    reference_docs_summary = []
+    for i, (ref_id, ref_content, ref_comment) in enumerate(
+        zip(
+            reference_doc_ids, reference_documents_content, reference_documents_comments
+        )
+    ):
+        ref_summary = reference_doc_summary_template.format(
+            doc_number=i + 1,
+            ref_id=ref_id,
+            ref_comment=ref_comment,
+            ref_content=ref_content,
+        )
+        reference_docs_summary.append(ref_summary)
+
+    return "\n".join(reference_docs_summary)
+
+
+def _format_answered_questions(
+    structured_feedback: Any,
+    previous_clarification_questions: List[ClarificationQuestion],
+) -> str:
+    """Format answered questions with both question and answer."""
+    if not structured_feedback.answer_to_clarification_questions:
+        return "No answers to clarification questions provided."
+
+    answered_parts = []
+    for q_id, answer in structured_feedback.answer_to_clarification_questions:
+        index = q_id - 1  # q_id is 1-indexed, so subtract 1 for list indexing
+        question_text = previous_clarification_questions[index].question
+        answered_parts.append(f"Q{q_id}: {question_text}\nA{q_id}: {answer}")
+
+    return "\n\n".join(answered_parts)
+
+
+async def _invoke_planner_model(
+    planner_model: Any,
+    prompt: str,
+    operation_type: str,
+) -> Tuple[str, List[str]]:
+    """Invoke the planner model and return plan content and questions."""
+    structured_planner_model = planner_model.with_structured_output(RedlinePlanOutput)
+
+    try:
+        response = await structured_planner_model.ainvoke(
+            [
+                SystemMessage(content=redline_planner_instructions),
+                HumanMessage(content=prompt),
+            ]
+        )
+
+        plan_content = response.plan
+        questions_list = response.clarification_questions
+
+        print(
+            f"✅ Generated {operation_type} redline plan ({len(plan_content)} characters)"
+        )
+        return plan_content, questions_list
+
+    except Exception as e:
+        print(f"❌ Failed to generate {operation_type} plan with LLM: {e}")
+        raise e
+
+
+def _create_clarification_questions(
+    questions_list: List[str],
+) -> List[ClarificationQuestion]:
+    """Convert string questions to ClarificationQuestion objects."""
+    clarification_questions = [
+        ClarificationQuestion(question=question) for question in questions_list
+    ]
+    print(f"❓ Generated {len(clarification_questions)} clarification questions")
+    return clarification_questions
 
 
 async def generate_redline_plan(
@@ -47,91 +164,108 @@ async def generate_redline_plan(
     Returns:
         Dict containing the redline plan and clarification questions
     """
+    # Check if this is a revision
+    if is_plan_revision(state):
+        return await _generate_revised_plan(state, config)
 
-    # Get inputs from state
-    doc_id = state["doc_id"]
-    reference_doc_ids = state["reference_doc_ids"]
-    general_comments = state["general_comments"]
-    reference_documents_comments = state["reference_documents_comments"]
-    base_document_content = state["base_document_content"]
-    reference_documents_content = state["reference_documents_content"]
-
-    # Get configuration
-    configurable = Configuration.from_runnable_config(config)
+    # Extract common data from state
+    state_data = _extract_state_data(state)
 
     # Set up planner model
-    planner_provider = get_config_value(configurable.planner_provider, "openai")
-    planner_model_name = get_config_value(configurable.planner_model, "gpt-4o-mini")
-    planner_model_kwargs = get_config_value(configurable.planner_model_kwargs, {})
-    max_questions = get_config_value(configurable.max_clarification_questions, 3)
-
-    planner_model = init_chat_model(
-        model=planner_model_name,
-        model_provider=planner_provider,
-        model_kwargs=planner_model_kwargs,
+    planner_model, max_questions, planner_provider, planner_model_name = (
+        _configure_planner_model(config)
     )
 
     print(f"🧠 Generating redline plan using {planner_provider}/{planner_model_name}")
 
-    # Format reference documents with their comments using template
-    reference_docs_summary = []
-    for i, (ref_id, ref_content, ref_comment) in enumerate(
-        zip(
-            reference_doc_ids, reference_documents_content, reference_documents_comments
-        )
-    ):
-        ref_summary = reference_doc_summary_template.format(
-            doc_number=i + 1,
-            ref_id=ref_id,
-            ref_comment=ref_comment,
-            ref_content=ref_content,
-        )
-        reference_docs_summary.append(ref_summary)
-
-    reference_docs_str = "\n".join(reference_docs_summary)
+    # Format reference documents
+    reference_docs_str = _format_reference_documents(
+        state_data["reference_doc_ids"],
+        state_data["reference_documents_content"],
+        state_data["reference_documents_comments"],
+    )
 
     # Create the planning prompt using template
     planning_prompt = planning_prompt_template.format(
         redline_planner_instructions=redline_planner_instructions,
-        doc_id=doc_id,
-        base_document_content=base_document_content,
-        general_comments=general_comments,
+        doc_id=state_data["doc_id"],
+        base_document_content=state_data["base_document_content"],
+        general_comments=state_data["general_comments"],
         reference_docs_str=reference_docs_str,
         max_questions=max_questions,
     )
 
-    # save the planning prompt to a file
-    with open("planning_prompt.txt", "w") as f:
-        f.write(planning_prompt)
-
-    # Set up structured output model
-    structured_planner_model = planner_model.with_structured_output(RedlinePlanOutput)
-
-    # Generate the plan using the LLM with structured output
-    try:
-        response = await structured_planner_model.ainvoke(
-            [
-                SystemMessage(content=redline_planner_instructions),
-                HumanMessage(content=planning_prompt),
-            ]
-        )
-
-        # Extract structured output
-        plan_content = response.plan
-        questions_list = response.clarification_questions
-
-        print(f"✅ Generated redline plan ({len(plan_content)} characters)")
-
-    except Exception as e:
-        print(f"❌ Failed to generate plan with LLM: {e}")
-        raise e
+    # Generate the plan using the LLM
+    plan_content, questions_list = await _invoke_planner_model(
+        planner_model, planning_prompt, "initial", planner_provider, planner_model_name
+    )
 
     # Convert string questions to ClarificationQuestion objects
-    clarification_questions = [
-        ClarificationQuestion(question=question) for question in questions_list
-    ]
+    clarification_questions = _create_clarification_questions(questions_list)
 
-    print(f"❓ Generated {len(clarification_questions)} clarification questions")
+    return {
+        "redline_plan": plan_content,
+        "clarification_questions": clarification_questions,
+    }
+
+
+async def _generate_revised_plan(
+    state: RedlineState, config: RunnableConfig
+) -> Dict[str, Any]:
+    """Generate revised plan based on user feedback."""
+    # Extract common data from state
+    state_data = _extract_state_data(state)
+
+    # Get feedback and previous plan
+    structured_feedback = state["structured_feedback"]
+    previous_plan = state.get("previous_redline_plan", "")
+    specific_feedback = (
+        structured_feedback.specific_feedback or "No specific feedback provided."
+    )
+
+    # Get the previous clarification questions to include in the answered questions
+    previous_clarification_questions = state.get("clarification_questions", [])
+
+    # Format answered questions with both question and answer
+    answered_questions = _format_answered_questions(
+        structured_feedback, previous_clarification_questions
+    )
+
+    # Set up planner model
+    planner_model, max_questions, planner_provider, planner_model_name = (
+        _configure_planner_model(config)
+    )
+
+    print(
+        f"🔄 Revising redline plan based on feedback using {planner_provider}/{planner_model_name}"
+    )
+
+    # Format reference documents
+    reference_docs_str = _format_reference_documents(
+        state_data["reference_doc_ids"],
+        state_data["reference_documents_content"],
+        state_data["reference_documents_comments"],
+    )
+
+    # Create the revision prompt
+    revision_prompt = planning_revision_prompt_template.format(
+        general_comments=state_data["general_comments"],
+        previous_plan=previous_plan,
+        specific_feedback=specific_feedback,
+        answered_questions=answered_questions,
+        doc_id=state_data["doc_id"],
+        base_document_content=state_data["base_document_content"],
+        reference_docs_str=reference_docs_str,
+        max_questions=max_questions,
+    )
+
+    # Generate the revised plan
+    plan_content, questions_list = await _invoke_planner_model(
+        planner_model, revision_prompt, "revised", planner_provider, planner_model_name
+    )
+
+    # Convert string questions to ClarificationQuestion objects
+    clarification_questions = _create_clarification_questions(questions_list)
 
     return {
         "redline_plan": plan_content,

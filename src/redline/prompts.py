@@ -48,6 +48,43 @@ Your thoughtful clarification questions should address:
 3. Any specific content preferences for the redlined output
 """
 
+planning_revision_prompt_template = """
+TASK DETAILS:
+General Instructions: {general_comments}
+
+---
+PREVIOUS PLAN TO REVISE:
+{previous_plan}
+
+---
+USER FEEDBACK:
+{specific_feedback}
+
+---
+ANSWERS TO CLARIFICATION QUESTIONS:
+{answered_questions}
+
+---
+BASE DOCUMENT:
+
+Base Document ID: {doc_id}
+Base Document Content: 
+{base_document_content}
+
+---
+REFERENCE DOCUMENTS:
+
+{reference_docs_str}
+
+---
+Based on the feedback above, revise the redline plan and generate new clarification questions.
+Generate:
+1. A revised comprehensive redline plan that addresses the user's feedback and incorporates their answers to clarification questions
+2. Exactly {max_questions} new clarifying questions that will help you better understand any remaining requirements
+
+The revised plan should address the specific feedback provided while maintaining the quality and detail expected for the redlining process.
+"""
+
 structured_feedback_prompt_template = """
 🎯 GENERATED REDLINE PLAN:
 {redline_plan}
