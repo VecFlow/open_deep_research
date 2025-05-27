@@ -1,7 +1,9 @@
 """Utility functions for the redline system."""
 
 import warnings
-from typing import List, Dict, Any, Optional
+from typing import Any
+
+from src.redline.prompts import reference_doc_summary_template
 
 
 def suppress_langchain_warnings():
@@ -20,33 +22,30 @@ def get_config_value(value: Any, default: Any = None) -> Any:
     return value if value is not None else default
 
 
-def format_document_content(content: str, max_length: Optional[int] = None) -> str:
-    """Format document content for processing.
+def format_reference_documents_content(state) -> str:
+    """Format reference documents with their comments using the standard template.
 
     Args:
-        content: Raw document content
-        max_length: Optional maximum length to truncate to
+        state: RedlineState containing reference document data
 
     Returns:
-        Formatted content string
+        Formatted string with all reference documents separated by "\n---\n"
     """
-    if max_length and len(content) > max_length:
-        return content[:max_length] + "..."
-    return content
 
-
-def extract_document_metadata(content: str) -> Dict[str, Any]:
-    """Extract metadata from document content.
-
-    Args:
-        content: Document content
-
-    Returns:
-        Dictionary of extracted metadata
-    """
-    # TODO: Implement metadata extraction
-    return {
-        "length": len(content),
-        "word_count": len(content.split()) if content else 0,
-        "has_content": bool(content.strip()),
-    }
+    formatted_docs = []
+    for i, (ref_id, ref_content, ref_comment) in enumerate(
+        zip(
+            state["reference_doc_ids"],
+            state["reference_documents_content"],
+            state["reference_documents_comments"],
+        )
+    ):
+        formatted_docs.append(
+            reference_doc_summary_template.format(
+                doc_number=i + 1,
+                ref_id=ref_id,
+                ref_comment=ref_comment,
+                ref_content=ref_content,
+            )
+        )
+    return "\n---\n".join(formatted_docs)

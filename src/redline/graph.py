@@ -17,6 +17,7 @@ from src.redline.nodes import (
     retrieve_documents,
     generate_redline_plan,
     collect_user_feedback,
+    generate_redline_suggestions,
 )
 
 # Suppress LangChain deprecation warnings
@@ -34,13 +35,14 @@ builder = StateGraph(
 builder.add_node("retrieve_documents", retrieve_documents)
 builder.add_node("generate_redline_plan", generate_redline_plan)
 builder.add_node("collect_user_feedback", collect_user_feedback)
+builder.add_node("generate_redline_suggestions", generate_redline_suggestions)
 
 
 def route_after_feedback(state: RedlineState):
-    """Route after user feedback - either end or regenerate plan."""
+    """Route after user feedback - either generate suggestions or regenerate plan."""
     structured_feedback = state.get("structured_feedback")
     if structured_feedback and structured_feedback.approval:
-        return END
+        return "generate_redline_suggestions"
     else:
         return "generate_redline_plan"
 
@@ -50,8 +52,11 @@ builder.add_edge(START, "retrieve_documents")
 builder.add_edge("retrieve_documents", "generate_redline_plan")
 builder.add_edge("generate_redline_plan", "collect_user_feedback")
 builder.add_conditional_edges(
-    "collect_user_feedback", route_after_feedback, ["generate_redline_plan", END]
+    "collect_user_feedback",
+    route_after_feedback,
+    ["generate_redline_plan", "generate_redline_suggestions"],
 )
+builder.add_edge("generate_redline_suggestions", END)
 
 # Compile the graph
 graph = builder.compile()

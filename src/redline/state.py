@@ -21,6 +21,43 @@ class StructuredFeedback(BaseModel):
     )
 
 
+class RedlineSuggestion(BaseModel):
+    """Individual redline suggestion for context-specific edits."""
+
+    original_text: str = Field(description="The original text of the document")
+    new_text: str = Field(description="The new text of the document")
+
+
+class ReplaceAllSuggestion(BaseModel):
+    """Replace-all suggestion for terms that should be replaced throughout the document."""
+
+    replace_type: str = Field(
+        default="replace_all", description="Type of replacement operation"
+    )
+    find_text: str = Field(
+        description="The exact text to find and replace throughout the document"
+    )
+    replace_text: str = Field(description="The text to replace all instances with")
+    case_sensitive: bool = Field(
+        default=False, description="Whether the replacement should be case sensitive"
+    )
+    whole_words_only: bool = Field(
+        default=True, description="Whether to match whole words only"
+    )
+
+
+class RedlineSuggestions(BaseModel):
+    """Complete set of redline suggestions."""
+
+    suggestions: List[RedlineSuggestion] = Field(
+        description="List of individual context-based edit suggestions"
+    )
+    replace_all_suggestions: List[ReplaceAllSuggestion] = Field(
+        default=[],
+        description="List of replace-all operations for terms that appear multiple times",
+    )
+
+
 class RedlineStateInput(TypedDict):
     doc_id: str  # Base document ID
     reference_doc_ids: List[str]  # List of reference document IDs
@@ -33,6 +70,7 @@ class RedlineStateOutput(TypedDict):
     clarification_questions: List[
         ClarificationQuestion
     ]  # 3 questions for user clarification
+    redline_suggestions: Optional[RedlineSuggestions]  # Generated redline suggestions
 
 
 class RedlineState(TypedDict):
@@ -50,3 +88,4 @@ class RedlineState(TypedDict):
     # Output fields
     redline_plan: str  # Plan for the redline task
     clarification_questions: List[ClarificationQuestion]
+    redline_suggestions: Optional[RedlineSuggestions]  # Generated redline suggestions

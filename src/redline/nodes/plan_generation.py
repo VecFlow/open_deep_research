@@ -14,7 +14,7 @@ from src.redline.prompts import (
     planning_revision_prompt_template,
     reference_doc_summary_template,
 )
-from src.redline.utils import get_config_value
+from src.redline.utils import get_config_value, format_reference_documents_content
 
 
 def is_plan_revision(state: RedlineState) -> bool:
@@ -64,29 +64,6 @@ def _configure_planner_model(config: RunnableConfig) -> Tuple[Any, int]:
     )
 
     return planner_model, max_questions, planner_provider, planner_model_name
-
-
-def _format_reference_documents(
-    reference_doc_ids: List[str],
-    reference_documents_content: List[str],
-    reference_documents_comments: List[str],
-) -> str:
-    """Format reference documents with their comments using template."""
-    reference_docs_summary = []
-    for i, (ref_id, ref_content, ref_comment) in enumerate(
-        zip(
-            reference_doc_ids, reference_documents_content, reference_documents_comments
-        )
-    ):
-        ref_summary = reference_doc_summary_template.format(
-            doc_number=i + 1,
-            ref_id=ref_id,
-            ref_comment=ref_comment,
-            ref_content=ref_content,
-        )
-        reference_docs_summary.append(ref_summary)
-
-    return "\n".join(reference_docs_summary)
 
 
 def _format_answered_questions(
@@ -176,11 +153,7 @@ async def generate_redline_plan(
     print(f"🧠 Generating redline plan using {planner_provider}/{planner_model_name}")
 
     # Format reference documents
-    reference_docs_str = _format_reference_documents(
-        state_data["reference_doc_ids"],
-        state_data["reference_documents_content"],
-        state_data["reference_documents_comments"],
-    )
+    reference_docs_str = format_reference_documents_content(state)
 
     # Create the planning prompt using template
     planning_prompt = planning_prompt_template.format(
@@ -238,11 +211,7 @@ async def _generate_revised_plan(
     )
 
     # Format reference documents
-    reference_docs_str = _format_reference_documents(
-        state_data["reference_doc_ids"],
-        state_data["reference_documents_content"],
-        state_data["reference_documents_comments"],
-    )
+    reference_docs_str = format_reference_documents_content(state)
 
     # Create the revision prompt
     revision_prompt = planning_revision_prompt_template.format(
