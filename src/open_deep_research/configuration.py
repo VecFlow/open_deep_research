@@ -57,7 +57,7 @@ class Configuration:
     
     # Legal-specific configuration
     analysis_structure: str = DEFAULT_LEGAL_ANALYSIS_STRUCTURE # Structure for legal analysis
-    max_results_per_query: int = 10 # Maximum results per document search query
+    max_results_per_query: int = 100 # Maximum results per document search query
     include_deposition_questions: bool = True # Whether to generate deposition questions
     max_witnesses_for_deposition: int = 5 # Maximum number of witnesses to generate questions for
 

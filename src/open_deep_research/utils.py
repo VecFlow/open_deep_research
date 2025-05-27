@@ -30,6 +30,8 @@ from langchain_core.tools import tool
 from langsmith import traceable
 
 from open_deep_research.state import Section
+
+MAX_RESULTS_PER_QUERY = 100
     
 def get_config_value(value):
     """
@@ -204,6 +206,7 @@ async def azureaisearch_search_async(search_queries: list[str], max_results: int
     Returns:
         List[dict]: list of search responses from Weaviate, one per query.
     """
+    print(f"max_results: {max_results}")
     # Define filters inside the function
     # You can modify this filters variable as needed
     filters = {"data_source_id": "e89cb0a2-2187-489e-b942-9154faa7c3f0"}  # Example: {"data_source_id": "source123"} or {"data_source_id": ["source1", "source2"]}
@@ -1500,7 +1503,7 @@ async def tavily_search(queries: List[str], max_results: int = 5, topic: Literal
 
 
 @tool
-async def azureaisearch_search(queries: List[str], max_results: int = 5, topic: str = "general") -> str:
+async def azureaisearch_search(queries: List[str], max_results: int = MAX_RESULTS_PER_QUERY, topic: str = "general") -> str:
     """
     Fetches results from Azure AI Search API.
     
@@ -1609,11 +1612,12 @@ async def search_documents_with_azure_ai(query_list: List[str], configurable) ->
     Returns:
         Formatted string of search results
     """
+
     # Use existing azureaisearch_search_async function
     # The filters are already configured in the Azure AI Search instance
     search_results = await azureaisearch_search_async(
         search_queries=query_list,
-        max_results=configurable.max_results_per_query or 10,
+        max_results=MAX_RESULTS_PER_QUERY,
         include_raw_content=True
     )
     
@@ -1636,8 +1640,6 @@ async def search_documents_with_azure_ai(query_list: List[str], configurable) ->
                     raw += "... [truncated]"
                 formatted_results += f"Full Text:\n{raw}\n"
             formatted_results += "-"*80 + "\n\n"
-
-    print(f"formatted_results: {formatted_results}")
             
     return formatted_results
 
