@@ -1,9 +1,10 @@
 """Plan generation node for creating redline plans and clarification questions."""
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
+from pydantic import BaseModel, Field
 
 from src.redline.state import RedlineState, ClarificationQuestion
 from src.redline.configuration import Configuration
@@ -15,6 +16,19 @@ from src.redline.prompts import (
 from src.redline.utils import get_config_value
 
 
+class RedlinePlanOutput(BaseModel):
+    """Structured output schema for redline plan generation."""
+
+    plan: str = Field(
+        description="A detailed redline plan outlining how to approach editing the document. This should include structural changes, clause-specific revisions, or references to precedent language."
+    )
+    clarification_questions: List[str] = Field(
+        description="A list of clarifying questions that must be answered before proceeding with the redline. Each question should be clear, actionable, and help improve the quality of the final redlined document.",
+        max_items=3,
+        min_items=1,
+    )
+
+
 async def generate_redline_plan(
     state: RedlineState, config: RunnableConfig
 ) -> Dict[str, Any]:
@@ -24,7 +38,7 @@ async def generate_redline_plan(
     1. Analyzes the base document and reference documents
     2. Considers the general comments and document-specific comments
     3. Generates a detailed redline plan
-    4. Creates exactly 3 clarification questions for the user
+    4. Creates exactly n clarification questions for the user
 
     Args:
         state: Current graph state containing documents and comments
@@ -86,27 +100,36 @@ async def generate_redline_plan(
         max_questions=max_questions,
     )
 
-    # Generate the plan using the LLM
+    # save the planning prompt to a file
+    with open("planning_prompt.txt", "w") as f:
+        f.write(planning_prompt)
+
+    # Set up structured output model
+    structured_planner_model = planner_model.with_structured_output(RedlinePlanOutput)
+
+    # Generate the plan using the LLM with structured output
     try:
-        response = await planner_model.ainvoke(
+        response = await structured_planner_model.ainvoke(
             [
                 SystemMessage(content=redline_planner_instructions),
                 HumanMessage(content=planning_prompt),
             ]
         )
 
-        # For now, use a structured approach with placeholders
-        # TODO: Implement structured output for better parsing
-        plan_content = response.content
+        # Extract structured output
+        plan_content = response.plan
+        questions_list = response.clarification_questions
+
         print(f"✅ Generated redline plan ({len(plan_content)} characters)")
 
     except Exception as e:
         print(f"❌ Failed to generate plan with LLM: {e}")
         raise e
 
-    # TODO: Parse clarification questions from LLM response
-    # For now, return empty list since we removed default questions
-    clarification_questions = []
+    # Convert string questions to ClarificationQuestion objects
+    clarification_questions = [
+        ClarificationQuestion(question=question) for question in questions_list
+    ]
 
     print(f"❓ Generated {len(clarification_questions)} clarification questions")
 

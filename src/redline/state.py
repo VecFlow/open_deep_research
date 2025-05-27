@@ -39,4 +39,4 @@ class RedlineState(TypedDict):
     redline_plan: str  # Plan for the redline task
     clarification_questions: List[
         ClarificationQuestion
-    ]  # 3 questions for user clarification
+    ]
