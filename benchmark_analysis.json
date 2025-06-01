@@ -1,0 +1,56 @@
+{
+  "total_judgments": 10,
+  "legal_discovery_wins": 6,
+  "gpt4_wins": 4,
+  "ties": 0,
+  "legal_discovery_win_rate": 0.6,
+  "gpt4_win_rate": 0.4,
+  "tie_rate": 0.0,
+  "average_legal_score": 78.9,
+  "average_gpt4_score": 76.6,
+  "wins_by_category": {
+    "liability_analysis": {
+      "legal_discovery": 1
+    },
+    "defense_analysis": {
+      "legal_discovery": 1
+    },
+    "discovery_strategy": {
+      "legal_discovery": 1
+    },
+    "witness_identification": {
+      "legal_discovery": 1
+    },
+    "damages_assessment": {
+      "gpt4": 1
+    },
+    "document_preservation": {
+      "gpt4": 1
+    },
+    "discovery_planning": {
+      "legal_discovery": 1
+    },
+    "procedural_issues": {
+      "legal_discovery": 1
+    },
+    "element_analysis": {
+      "gpt4": 1
+    },
+    "expert_witnesses": {
+      "gpt4": 1
+    }
+  },
+  "wins_by_complexity": {
+    "medium": {
+      "legal_discovery": 4,
+      "gpt4": 1
+    },
+    "high": {
+      "legal_discovery": 2,
+      "gpt4": 2
+    },
+    "low": {
+      "gpt4": 1
+    }
+  }
+}

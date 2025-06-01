@@ -1,0 +1,11 @@
+question_id,question,question_type,complexity,expected_focus
+1,"Analyze the liability issues in a slip and fall case at a grocery store where a customer claims inadequate maintenance caused their injury","liability_analysis","medium","premises liability, duty of care, causation"
+2,"What are the key discovery strategies for a breach of contract dispute involving a software licensing agreement?","discovery_strategy","medium","contract interpretation, breach elements, damages"
+3,"Identify potential witnesses and deposition questions for an employment discrimination case based on age","witness_identification","high","employment law, discrimination claims, witness testimony"
+4,"Analyze the damages calculation methodology for a product liability case involving a defective medical device","damages_assessment","high","product liability, medical damages, economic losses"
+5,"What document preservation obligations exist in a construction defect litigation?","document_preservation","medium","construction law, evidence preservation, litigation holds"
+6,"Develop a discovery plan for investigating potential securities fraud in a publicly traded company","discovery_planning","high","securities law, financial fraud, corporate governance"
+7,"Analyze the statute of limitations issues in a medical malpractice case with delayed discovery of harm","procedural_issues","medium","medical malpractice, statute of limitations, discovery rule"
+8,"What are the key elements to establish negligence in a motor vehicle accident case?","element_analysis","low","tort law, negligence, causation"
+9,"Identify expert witness requirements for a patent infringement dispute in the pharmaceutical industry","expert_witnesses","high","intellectual property, patent law, pharmaceutical expertise"
+10,"Analyze potential defenses in a personal injury case involving comparative negligence","defense_analysis","medium","comparative negligence, personal injury, fault allocation" 
