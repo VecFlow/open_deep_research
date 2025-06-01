@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Benchmark Results Visualizer
-Creates graphs and charts comparing Legal Discovery System vs GPT-4 results
+Creates graphs and charts comparing Legal Discovery System vs O3 with Document Search results
 """
 
 import json
@@ -43,10 +43,10 @@ class BenchmarkVisualizer:
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
         
         # Overall win rates
-        labels = ['Legal Discovery', 'GPT-4', 'Ties']
+        labels = ['Legal Discovery', 'O3 with Docs', 'Ties']
         sizes = [
             analysis.get('legal_discovery_wins', 0),
-            analysis.get('gpt4_wins', 0),
+            analysis.get('o3_wins', 0),
             analysis.get('ties', 0)
         ]
         colors = ['#2E8B57', '#4169E1', '#FFD700']
@@ -76,10 +76,10 @@ class BenchmarkVisualizer:
         
         # Average scores
         legal_score = analysis.get('average_legal_score', 0)
-        gpt4_score = analysis.get('average_gpt4_score', 0)
+        o3_score = analysis.get('average_o3_score', 0)
         
-        systems = ['Legal Discovery', 'GPT-4']
-        scores = [legal_score, gpt4_score]
+        systems = ['Legal Discovery', 'O3 with Docs']
+        scores = [legal_score, o3_score]
         colors = ['#2E8B57', '#4169E1']
         
         # Bar chart of average scores
@@ -95,10 +95,10 @@ class BenchmarkVisualizer:
                     f'{score:.1f}', ha='center', va='bottom', fontweight='bold')
         
         # Score difference
-        diff = legal_score - gpt4_score
+        diff = legal_score - o3_score
         ax2.barh(['Score Difference'], [diff], 
                 color='green' if diff > 0 else 'red', alpha=0.7)
-        ax2.set_xlabel('Score Difference (Legal Discovery - GPT-4)', fontsize=12)
+        ax2.set_xlabel('Score Difference (Legal Discovery - O3)', fontsize=12)
         ax2.set_title('Performance Gap', fontsize=16, fontweight='bold')
         ax2.axvline(x=0, color='black', linestyle='-', linewidth=0.8)
         ax2.grid(axis='x', alpha=0.3)
@@ -122,14 +122,14 @@ class BenchmarkVisualizer:
         if wins_by_category:
             categories = list(wins_by_category.keys())
             legal_wins = [wins_by_category[cat].get('legal_discovery', 0) for cat in categories]
-            gpt4_wins = [wins_by_category[cat].get('gpt4', 0) for cat in categories]
+            o3_wins = [wins_by_category[cat].get('o3', 0) for cat in categories]
             ties = [wins_by_category[cat].get('tie', 0) for cat in categories]
             
             x = np.arange(len(categories))
             width = 0.25
             
             ax1.bar(x - width, legal_wins, width, label='Legal Discovery', color='#2E8B57', alpha=0.8)
-            ax1.bar(x, gpt4_wins, width, label='GPT-4', color='#4169E1', alpha=0.8)
+            ax1.bar(x, o3_wins, width, label='O3 with Docs', color='#4169E1', alpha=0.8)
             ax1.bar(x + width, ties, width, label='Ties', color='#FFD700', alpha=0.8)
             
             ax1.set_xlabel('Question Types', fontsize=12)
@@ -144,13 +144,13 @@ class BenchmarkVisualizer:
         if wins_by_complexity:
             complexities = list(wins_by_complexity.keys())
             legal_wins_comp = [wins_by_complexity[comp].get('legal_discovery', 0) for comp in complexities]
-            gpt4_wins_comp = [wins_by_complexity[comp].get('gpt4', 0) for comp in complexities]
+            o3_wins_comp = [wins_by_complexity[comp].get('o3', 0) for comp in complexities]
             ties_comp = [wins_by_complexity[comp].get('tie', 0) for comp in complexities]
             
             x_comp = np.arange(len(complexities))
             
             ax2.bar(x_comp - width, legal_wins_comp, width, label='Legal Discovery', color='#2E8B57', alpha=0.8)
-            ax2.bar(x_comp, gpt4_wins_comp, width, label='GPT-4', color='#4169E1', alpha=0.8)
+            ax2.bar(x_comp, o3_wins_comp, width, label='O3 with Docs', color='#4169E1', alpha=0.8)
             ax2.bar(x_comp + width, ties_comp, width, label='Ties', color='#FFD700', alpha=0.8)
             
             ax2.set_xlabel('Question Complexity', fontsize=12)
@@ -177,20 +177,20 @@ class BenchmarkVisualizer:
         criteria = ['comprehensiveness', 'accuracy', 'practical_utility', 'organization_clarity', 'specificity']
         
         legal_scores = []
-        gpt4_scores = []
+        o3_scores = []
         question_ids = []
         
         for result in successful_results:
             eval_data = result["evaluation"]
             if "response_a_scores" in eval_data and "response_b_scores" in eval_data:
                 legal_row = [eval_data["response_a_scores"].get(c, 0) for c in criteria]
-                gpt4_row = [eval_data["response_b_scores"].get(c, 0) for c in criteria]
+                o3_row = [eval_data["response_b_scores"].get(c, 0) for c in criteria]
                 
                 legal_scores.append(legal_row)
-                gpt4_scores.append(gpt4_row)
+                o3_scores.append(o3_row)
                 question_ids.append(result["question_id"])
         
-        if legal_scores and gpt4_scores:
+        if legal_scores and o3_scores:
             # Create comparison heatmap
             fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 8))
             
@@ -201,18 +201,18 @@ class BenchmarkVisualizer:
             ax1.set_title('Legal Discovery Scores', fontsize=14, fontweight='bold')
             ax1.set_ylabel('Questions', fontsize=12)
             
-            # GPT-4 scores
-            gpt4_df = pd.DataFrame(gpt4_scores, columns=[c.replace('_', ' ').title() for c in criteria],
+            # O3 scores
+            o3_df = pd.DataFrame(o3_scores, columns=[c.replace('_', ' ').title() for c in criteria],
                                   index=[f"Q{qid}" for qid in question_ids])
-            sns.heatmap(gpt4_df, annot=True, fmt='.1f', cmap='Blues', ax=ax2, cbar_kws={'label': 'Score'})
-            ax2.set_title('GPT-4 Scores', fontsize=14, fontweight='bold')
+            sns.heatmap(o3_df, annot=True, fmt='.1f', cmap='Blues', ax=ax2, cbar_kws={'label': 'Score'})
+            ax2.set_title('O3 with Document Search Scores', fontsize=14, fontweight='bold')
             ax2.set_ylabel('')
             
-            # Difference (Legal - GPT4)
-            diff_df = legal_df - gpt4_df
+            # Difference (Legal - O3)
+            diff_df = legal_df - o3_df
             sns.heatmap(diff_df, annot=True, fmt='.1f', cmap='RdBu_r', center=0, ax=ax3, 
                        cbar_kws={'label': 'Score Difference'})
-            ax3.set_title('Score Differences\n(Legal Discovery - GPT-4)', fontsize=14, fontweight='bold')
+            ax3.set_title('Score Differences\n(Legal Discovery - O3)', fontsize=14, fontweight='bold')
             ax3.set_ylabel('')
             
             plt.tight_layout()
@@ -227,26 +227,26 @@ class BenchmarkVisualizer:
             return
         
         legal_times = [r.get("legal_execution_time", 0) for r in successful_results]
-        gpt4_times = [r.get("gpt4_execution_time", 0) for r in successful_results]
+        o3_times = [r.get("o3_execution_time", 0) for r in successful_results]
         question_ids = [r["question_id"] for r in successful_results]
         
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
         
         # Scatter plot
-        ax1.scatter(legal_times, gpt4_times, alpha=0.7, s=60, color='purple')
+        ax1.scatter(legal_times, o3_times, alpha=0.7, s=60, color='purple')
         
         # Add diagonal line (equal times)
-        max_time = max(max(legal_times), max(gpt4_times))
+        max_time = max(max(legal_times), max(o3_times))
         ax1.plot([0, max_time], [0, max_time], 'r--', alpha=0.5, label='Equal Time')
         
         ax1.set_xlabel('Legal Discovery Execution Time (seconds)', fontsize=12)
-        ax1.set_ylabel('GPT-4 Execution Time (seconds)', fontsize=12)
+        ax1.set_ylabel('O3 with Document Search Execution Time (seconds)', fontsize=12)
         ax1.set_title('Execution Time Comparison', fontsize=14, fontweight='bold')
         ax1.legend()
         ax1.grid(alpha=0.3)
         
         # Box plot
-        ax2.boxplot([legal_times, gpt4_times], labels=['Legal Discovery', 'GPT-4'])
+        ax2.boxplot([legal_times, o3_times], labels=['Legal Discovery', 'O3 with Docs'])
         ax2.set_ylabel('Execution Time (seconds)', fontsize=12)
         ax2.set_title('Execution Time Distribution', fontsize=14, fontweight='bold')
         ax2.grid(axis='y', alpha=0.3)
@@ -261,8 +261,8 @@ class BenchmarkVisualizer:
         gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
         
         # Title
-        fig.suptitle('Legal Discovery System vs GPT-4 Benchmark Results', 
-                    fontsize=20, fontweight='bold', y=0.95)
+        fig.suptitle('Legal Discovery System vs O3 with Document Search - Suffolk Case Benchmark Results', 
+                    fontsize=18, fontweight='bold', y=0.95)
         
         # Key metrics text
         ax_text = fig.add_subplot(gs[0, :])
@@ -270,16 +270,16 @@ class BenchmarkVisualizer:
         
         total_questions = analysis.get('total_judgments', 0)
         legal_wins = analysis.get('legal_discovery_wins', 0)
-        gpt4_wins = analysis.get('gpt4_wins', 0)
+        o3_wins = analysis.get('o3_wins', 0)
         ties = analysis.get('ties', 0)
         legal_score = analysis.get('average_legal_score', 0)
-        gpt4_score = analysis.get('average_gpt4_score', 0)
+        o3_score = analysis.get('average_o3_score', 0)
         
         summary_text = f"""
-BENCHMARK SUMMARY
+SUFFOLK CASE BENCHMARK SUMMARY
 Total Questions Evaluated: {total_questions}
 Legal Discovery System: {legal_wins} wins ({legal_wins/total_questions*100:.1f}%) | Avg Score: {legal_score:.1f}/100
-GPT-4 Direct: {gpt4_wins} wins ({gpt4_wins/total_questions*100:.1f}%) | Avg Score: {gpt4_score:.1f}/100
+O3 with Document Search: {o3_wins} wins ({o3_wins/total_questions*100:.1f}%) | Avg Score: {o3_score:.1f}/100
 Ties: {ties} ({ties/total_questions*100:.1f}%)
         """
         
@@ -288,16 +288,16 @@ Ties: {ties} ({ties/total_questions*100:.1f}%)
         
         # Win rate pie chart
         ax1 = fig.add_subplot(gs[1, 0])
-        sizes = [legal_wins, gpt4_wins, ties]
-        labels = ['Legal Discovery', 'GPT-4', 'Ties']
+        sizes = [legal_wins, o3_wins, ties]
+        labels = ['Legal Discovery', 'O3 with Docs', 'Ties']
         colors = ['#2E8B57', '#4169E1', '#FFD700']
         ax1.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
         ax1.set_title('Win Distribution', fontweight='bold')
         
         # Score comparison
         ax2 = fig.add_subplot(gs[1, 1])
-        systems = ['Legal\nDiscovery', 'GPT-4']
-        scores = [legal_score, gpt4_score]
+        systems = ['Legal\nDiscovery', 'O3 with\nDocs']
+        scores = [legal_score, o3_score]
         bars = ax2.bar(systems, scores, color=['#2E8B57', '#4169E1'], alpha=0.8)
         ax2.set_ylabel('Average Score')
         ax2.set_title('Quality Scores', fontweight='bold')
@@ -312,12 +312,12 @@ Ties: {ties} ({ties/total_questions*100:.1f}%)
         if wins_by_complexity:
             complexities = list(wins_by_complexity.keys())
             legal_wins_comp = [wins_by_complexity[comp].get('legal_discovery', 0) for comp in complexities]
-            gpt4_wins_comp = [wins_by_complexity[comp].get('gpt4', 0) for comp in complexities]
+            o3_wins_comp = [wins_by_complexity[comp].get('o3', 0) for comp in complexities]
             
             x = np.arange(len(complexities))
             width = 0.35
             ax3.bar(x - width/2, legal_wins_comp, width, label='Legal Discovery', color='#2E8B57', alpha=0.8)
-            ax3.bar(x + width/2, gpt4_wins_comp, width, label='GPT-4', color='#4169E1', alpha=0.8)
+            ax3.bar(x + width/2, o3_wins_comp, width, label='O3 with Docs', color='#4169E1', alpha=0.8)
             ax3.set_xlabel('Complexity')
             ax3.set_ylabel('Wins')
             ax3.set_title('Performance by Complexity', fontweight='bold')

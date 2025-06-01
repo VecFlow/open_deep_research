@@ -1,56 +1,52 @@
 {
   "total_judgments": 10,
-  "legal_discovery_wins": 6,
-  "gpt4_wins": 4,
+  "legal_discovery_wins": 7,
+  "o3_wins": 3,
   "ties": 0,
-  "legal_discovery_win_rate": 0.6,
-  "gpt4_win_rate": 0.4,
+  "legal_discovery_win_rate": 0.7,
+  "o3_win_rate": 0.3,
   "tie_rate": 0.0,
-  "average_legal_score": 78.9,
-  "average_gpt4_score": 76.6,
+  "average_legal_score": 80.9,
+  "average_o3_score": 78.5,
   "wins_by_category": {
-    "liability_analysis": {
+    "document_retrieval": {
+      "o3": 1
+    },
+    "narrative_synthesis": {
       "legal_discovery": 1
     },
-    "defense_analysis": {
+    "cross_reference_analysis": {
       "legal_discovery": 1
     },
-    "discovery_strategy": {
+    "timeline_analysis": {
       "legal_discovery": 1
     },
-    "witness_identification": {
+    "financial_analysis": {
       "legal_discovery": 1
     },
-    "damages_assessment": {
-      "gpt4": 1
+    "legal_drafting": {
+      "o3": 1
     },
-    "document_preservation": {
-      "gpt4": 1
-    },
-    "discovery_planning": {
+    "impeachment_strategy": {
       "legal_discovery": 1
     },
-    "procedural_issues": {
+    "recall_proof_questioning": {
       "legal_discovery": 1
     },
-    "element_analysis": {
-      "gpt4": 1
+    "policy_practice_analysis": {
+      "o3": 1
     },
-    "expert_witnesses": {
-      "gpt4": 1
+    "ethical_analysis": {
+      "legal_discovery": 1
     }
   },
   "wins_by_complexity": {
     "medium": {
-      "legal_discovery": 4,
-      "gpt4": 1
+      "o3": 3,
+      "legal_discovery": 1
     },
     "high": {
-      "legal_discovery": 2,
-      "gpt4": 2
-    },
-    "low": {
-      "gpt4": 1
+      "legal_discovery": 6
     }
   }
 }

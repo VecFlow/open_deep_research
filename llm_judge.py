@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 LLM Judge for Benchmarking
-Compares results from legal discovery system and GPT-4 using an LLM as judge
+Compares results from legal discovery system and O3 with document search using an LLM as judge
 """
 
 import asyncio
@@ -17,9 +17,9 @@ class LLMJudge:
     """LLM Judge for comparing legal analysis results"""
     
     def __init__(self, legal_results_file: str = "legal_discovery_results.json", 
-                 gpt4_results_file: str = "gpt4_results.json"):
+                 o3_results_file: str = "o3_results.json"):
         self.legal_results_file = legal_results_file
-        self.gpt4_results_file = gpt4_results_file
+        self.o3_results_file = o3_results_file
         self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         
         # Judging criteria and prompt
@@ -91,14 +91,14 @@ Be objective and fair in your evaluation. Focus on the quality of legal analysis
         with open(self.legal_results_file, 'r', encoding='utf-8') as file:
             legal_results = json.load(file)
         
-        with open(self.gpt4_results_file, 'r', encoding='utf-8') as file:
-            gpt4_results = json.load(file)
+        with open(self.o3_results_file, 'r', encoding='utf-8') as file:
+            o3_results = json.load(file)
         
-        return legal_results, gpt4_results
+        return legal_results, o3_results
     
     async def judge_comparison(self, question: str, legal_response: str, 
-                              gpt4_response: str, question_id: str) -> Dict[str, Any]:
-        """Judge a single comparison between legal discovery and GPT-4 responses"""
+                              o3_response: str, question_id: str) -> Dict[str, Any]:
+        """Judge a single comparison between legal discovery and O3 responses"""
         print(f"Judging comparison for question {question_id}...")
         
         comparison_prompt = f"""
@@ -108,8 +108,8 @@ Be objective and fair in your evaluation. Focus on the quality of legal analysis
 **RESPONSE A (Legal Discovery System):**
 {legal_response}
 
-**RESPONSE B (GPT-4 Direct):**
-{gpt4_response}
+**RESPONSE B (O3 with Document Search):**
+{o3_response}
 
 Please evaluate and compare these two responses according to the criteria provided."""
         
@@ -169,25 +169,25 @@ Please evaluate and compare these two responses according to the criteria provid
     
     async def judge_all_comparisons(self) -> List[Dict[str, Any]]:
         """Judge all comparisons between the two systems"""
-        legal_results, gpt4_results = self.load_results()
+        legal_results, o3_results = self.load_results()
         
         # Create lookup dictionaries by question_id
         legal_lookup = {r["question_id"]: r for r in legal_results if r["status"] == "success"}
-        gpt4_lookup = {r["question_id"]: r for r in gpt4_results if r["status"] == "success"}
+        o3_lookup = {r["question_id"]: r for r in o3_results if r["status"] == "success"}
         
         # Find common successful questions
-        common_questions = set(legal_lookup.keys()) & set(gpt4_lookup.keys())
+        common_questions = set(legal_lookup.keys()) & set(o3_lookup.keys())
         print(f"Found {len(common_questions)} questions with successful results from both systems")
         
         judgments = []
         for question_id in sorted(common_questions):
             legal_result = legal_lookup[question_id]
-            gpt4_result = gpt4_lookup[question_id]
+            o3_result = o3_lookup[question_id]
             
             judgment = await self.judge_comparison(
                 legal_result["question"],
                 legal_result["result"],
-                gpt4_result["result"],
+                o3_result["result"],
                 question_id
             )
             
@@ -197,7 +197,9 @@ Please evaluate and compare these two responses according to the criteria provid
                 "complexity": legal_result["complexity"],
                 "expected_focus": legal_result["expected_focus"],
                 "legal_execution_time": legal_result["execution_time"],
-                "gpt4_execution_time": gpt4_result["execution_time"]
+                "o3_execution_time": o3_result["execution_time"],
+                "o3_document_context_length": o3_result.get("document_context_length", 0),
+                "o3_search_queries": o3_result.get("search_queries", [])
             })
             
             judgments.append(judgment)
@@ -224,11 +226,11 @@ Please evaluate and compare these two responses according to the criteria provid
             return {"error": "No successful judgments found"}
         
         legal_wins = 0
-        gpt4_wins = 0
+        o3_wins = 0
         ties = 0
         
         legal_scores = []
-        gpt4_scores = []
+        o3_scores = []
         
         wins_by_category = {}
         wins_by_complexity = {}
@@ -240,9 +242,9 @@ Please evaluate and compare these two responses according to the criteria provid
             if winner == "A":  # Legal Discovery System
                 legal_wins += 1
                 category_winner = "legal_discovery"
-            elif winner == "B":  # GPT-4
-                gpt4_wins += 1
-                category_winner = "gpt4"
+            elif winner == "B":  # O3
+                o3_wins += 1
+                category_winner = "o3"
             else:
                 ties += 1
                 category_winner = "tie"
@@ -259,20 +261,20 @@ Please evaluate and compare these two responses according to the criteria provid
             
             # Collect scores
             legal_scores.append(eval_data.get("response_a_total", 0))
-            gpt4_scores.append(eval_data.get("response_b_total", 0))
+            o3_scores.append(eval_data.get("response_b_total", 0))
         
         total_judgments = len(successful_judgments)
         
         return {
             "total_judgments": total_judgments,
             "legal_discovery_wins": legal_wins,
-            "gpt4_wins": gpt4_wins,
+            "o3_wins": o3_wins,
             "ties": ties,
             "legal_discovery_win_rate": legal_wins / total_judgments if total_judgments > 0 else 0,
-            "gpt4_win_rate": gpt4_wins / total_judgments if total_judgments > 0 else 0,
+            "o3_win_rate": o3_wins / total_judgments if total_judgments > 0 else 0,
             "tie_rate": ties / total_judgments if total_judgments > 0 else 0,
             "average_legal_score": sum(legal_scores) / len(legal_scores) if legal_scores else 0,
-            "average_gpt4_score": sum(gpt4_scores) / len(gpt4_scores) if gpt4_scores else 0,
+            "average_o3_score": sum(o3_scores) / len(o3_scores) if o3_scores else 0,
             "wins_by_category": wins_by_category,
             "wins_by_complexity": wins_by_complexity
         }
@@ -302,10 +304,10 @@ async def main():
         print(f"\nBenchmark Analysis Results:")
         print(f"Total judgments: {analysis.get('total_judgments', 0)}")
         print(f"Legal Discovery wins: {analysis.get('legal_discovery_wins', 0)} ({analysis.get('legal_discovery_win_rate', 0):.1%})")
-        print(f"GPT-4 wins: {analysis.get('gpt4_wins', 0)} ({analysis.get('gpt4_win_rate', 0):.1%})")
+        print(f"O3 wins: {analysis.get('o3_wins', 0)} ({analysis.get('o3_win_rate', 0):.1%})")
         print(f"Ties: {analysis.get('ties', 0)} ({analysis.get('tie_rate', 0):.1%})")
         print(f"Average Legal Discovery score: {analysis.get('average_legal_score', 0):.1f}/100")
-        print(f"Average GPT-4 score: {analysis.get('average_gpt4_score', 0):.1f}/100")
+        print(f"Average O3 score: {analysis.get('average_o3_score', 0):.1f}/100")
         
     except FileNotFoundError as e:
         print(f"Error: Could not find results files. Please run the benchmark systems first. {e}")

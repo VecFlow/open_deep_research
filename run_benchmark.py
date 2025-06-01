@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Legal Discovery Benchmark Suite
-Main orchestrator for running comprehensive benchmarks comparing Legal Discovery System vs GPT-4
+Main orchestrator for running comprehensive benchmarks comparing Legal Discovery System vs O3 with Document Search
 """
 
 import asyncio
@@ -14,7 +14,7 @@ import subprocess
 
 # Import our benchmark modules
 from legal_discovery_runner import LegalDiscoveryRunner
-from gpt4_runner import GPT4Runner
+from o3_runner import O3Runner
 from llm_judge import LLMJudge
 from visualizer import BenchmarkVisualizer
 
@@ -86,21 +86,21 @@ class BenchmarkOrchestrator:
             print(f"❌ Legal Discovery benchmark failed: {e}")
             return False
     
-    async def run_gpt4_benchmark(self) -> bool:
-        """Run the GPT-4 benchmark"""
+    async def run_o3_benchmark(self) -> bool:
+        """Run the O3 with document search benchmark"""
         print("\n" + "="*60)
-        print("PHASE 2: Running GPT-4 Benchmark")
+        print("PHASE 2: Running O3 with Document Search Benchmark")
         print("="*60)
         
         try:
-            runner = GPT4Runner()
+            runner = O3Runner()
             results = await runner.run_all_questions()
             
             success_count = len([r for r in results if r["status"] == "success"])
             total_count = len(results)
             
-            print(f"✓ GPT-4 benchmark completed: {success_count}/{total_count} successful")
-            self.results_summary["gpt4"] = {
+            print(f"✓ O3 with document search benchmark completed: {success_count}/{total_count} successful")
+            self.results_summary["o3"] = {
                 "total": total_count,
                 "successful": success_count,
                 "success_rate": success_count / total_count if total_count > 0 else 0
@@ -108,7 +108,7 @@ class BenchmarkOrchestrator:
             return True
             
         except Exception as e:
-            print(f"❌ GPT-4 benchmark failed: {e}")
+            print(f"❌ O3 benchmark failed: {e}")
             return False
     
     async def run_llm_judge(self) -> bool:
@@ -129,19 +129,19 @@ class BenchmarkOrchestrator:
             
             total_judgments = analysis.get('total_judgments', 0)
             legal_wins = analysis.get('legal_discovery_wins', 0)
-            gpt4_wins = analysis.get('gpt4_wins', 0)
+            o3_wins = analysis.get('o3_wins', 0)
             
             print(f"✓ LLM Judge completed: {total_judgments} comparisons")
             print(f"  Legal Discovery wins: {legal_wins}")
-            print(f"  GPT-4 wins: {gpt4_wins}")
+            print(f"  O3 wins: {o3_wins}")
             print(f"  Ties: {analysis.get('ties', 0)}")
             
             self.results_summary["judge"] = {
                 "total_judgments": total_judgments,
                 "legal_wins": legal_wins,
-                "gpt4_wins": gpt4_wins,
+                "o3_wins": o3_wins,
                 "legal_win_rate": analysis.get('legal_discovery_win_rate', 0),
-                "gpt4_win_rate": analysis.get('gpt4_win_rate', 0)
+                "o3_win_rate": analysis.get('o3_win_rate', 0)
             }
             return True
             
@@ -176,14 +176,14 @@ class BenchmarkOrchestrator:
         duration = end_time - self.start_time if self.start_time else "Unknown"
         
         report = f"""
-# Legal Discovery System Benchmark Report
+# Legal Discovery System vs O3 with Document Search Benchmark Report
 
 **Generated:** {end_time.strftime('%Y-%m-%d %H:%M:%S')}
 **Duration:** {duration}
 
 ## Summary
 
-This benchmark compared the Legal Discovery System against GPT-4 direct responses across {self.results_summary.get('legal_discovery', {}).get('total', 0)} legal questions.
+This benchmark compared the Legal Discovery System against O3 with document search across {self.results_summary.get('legal_discovery', {}).get('total', 0)} Suffolk case legal questions. Both systems had access to the same document database containing 70,000 emails and case materials.
 
 ### System Performance
 
@@ -191,9 +191,9 @@ This benchmark compared the Legal Discovery System against GPT-4 direct response
 - Questions processed: {self.results_summary.get('legal_discovery', {}).get('successful', 0)}/{self.results_summary.get('legal_discovery', {}).get('total', 0)}
 - Success rate: {self.results_summary.get('legal_discovery', {}).get('success_rate', 0):.1%}
 
-**GPT-4 Direct:**
-- Questions processed: {self.results_summary.get('gpt4', {}).get('successful', 0)}/{self.results_summary.get('gpt4', {}).get('total', 0)}
-- Success rate: {self.results_summary.get('gpt4', {}).get('success_rate', 0):.1%}
+**O3 with Document Search:**
+- Questions processed: {self.results_summary.get('o3', {}).get('successful', 0)}/{self.results_summary.get('o3', {}).get('total', 0)}
+- Success rate: {self.results_summary.get('o3', {}).get('success_rate', 0):.1%}
 
 ### Head-to-Head Comparison
 
@@ -201,12 +201,26 @@ This benchmark compared the Legal Discovery System against GPT-4 direct response
 
 **Results:**
 - Legal Discovery wins: {self.results_summary.get('judge', {}).get('legal_wins', 0)} ({self.results_summary.get('judge', {}).get('legal_win_rate', 0):.1%})
-- GPT-4 wins: {self.results_summary.get('judge', {}).get('gpt4_wins', 0)} ({self.results_summary.get('judge', {}).get('gpt4_win_rate', 0):.1%})
+- O3 wins: {self.results_summary.get('judge', {}).get('o3_wins', 0)} ({self.results_summary.get('judge', {}).get('o3_win_rate', 0):.1%})
+
+### Key Differences
+
+**Legal Discovery System:**
+- Multi-step workflow with automated category planning
+- Document search integrated into analysis workflow
+- Specialized legal analysis prompts and structure
+- Deposition question generation
+
+**O3 with Document Search:**
+- Direct analysis approach with document context
+- Query generation followed by document search
+- General legal expertise with case-specific evidence
+- More streamlined execution
 
 ### Files Generated
 
 - `legal_discovery_results.json` - Raw Legal Discovery system results
-- `gpt4_results.json` - Raw GPT-4 results  
+- `o3_results.json` - Raw O3 with document search results  
 - `judge_results.json` - Detailed LLM judge evaluations
 - `benchmark_analysis.json` - Statistical analysis summary
 - `benchmark_charts/` - Visualization charts and graphs
@@ -220,6 +234,16 @@ The benchmark provides objective comparison across multiple dimensions:
 - **Organization & Clarity**: Structure and readability
 - **Specificity**: Concrete guidance vs. generalities
 
+### Case Context
+
+This benchmark used Suffolk case-specific questions covering:
+- Fraud in the inducement claims
+- Construction contract breaches
+- Settlement agreement disputes
+- Discovery strategy for complex litigation
+- Damages assessment and calculation
+- Executive deposition planning
+
 ### Next Steps
 
 1. Review detailed results in the generated JSON files
@@ -229,7 +253,7 @@ The benchmark provides objective comparison across multiple dimensions:
 
 ---
 
-This is an MVP benchmark system. Results should be interpreted in context and can be used to guide further development and evaluation.
+This benchmark compares a specialized legal discovery workflow against a state-of-the-art LLM with document access on real-world legal questions from an active construction litigation case.
         """
         
         # Save report
@@ -247,12 +271,12 @@ This is an MVP benchmark system. Results should be interpreted in context and ca
         print("- benchmark_charts/ (visualizations)")
         print("- *.json (raw results)")
     
-    async def run_full_benchmark(self, skip_legal: bool = False, skip_gpt4: bool = False, 
+    async def run_full_benchmark(self, skip_legal: bool = False, skip_o3: bool = False, 
                                 skip_judge: bool = False, skip_viz: bool = False):
         """Run the complete benchmark suite"""
         self.start_time = datetime.now()
         
-        print("🚀 Starting Legal Discovery System Benchmark Suite")
+        print("🚀 Starting Legal Discovery System vs O3 Benchmark Suite")
         print(f"Started at: {self.start_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
         # Phase 1: Legal Discovery System
@@ -264,14 +288,14 @@ This is an MVP benchmark system. Results should be interpreted in context and ca
         else:
             print("⏭️  Skipping Legal Discovery benchmark")
         
-        # Phase 2: GPT-4
-        if not skip_gpt4:
-            success = await self.run_gpt4_benchmark()
+        # Phase 2: O3
+        if not skip_o3:
+            success = await self.run_o3_benchmark()
             if not success:
-                print("❌ Benchmark failed at GPT-4 phase")
+                print("❌ Benchmark failed at O3 phase")
                 return False
         else:
-            print("⏭️  Skipping GPT-4 benchmark")
+            print("⏭️  Skipping O3 benchmark")
         
         # Phase 3: LLM Judge
         if not skip_judge:
@@ -298,11 +322,11 @@ This is an MVP benchmark system. Results should be interpreted in context and ca
 
 async def main():
     """Main entry point"""
-    parser = argparse.ArgumentParser(description="Legal Discovery System Benchmark Suite")
+    parser = argparse.ArgumentParser(description="Legal Discovery System vs O3 Benchmark Suite")
     parser.add_argument("--skip-legal", action="store_true", 
                        help="Skip legal discovery system benchmark")
-    parser.add_argument("--skip-gpt4", action="store_true", 
-                       help="Skip GPT-4 benchmark")
+    parser.add_argument("--skip-o3", action="store_true", 
+                       help="Skip O3 benchmark")
     parser.add_argument("--skip-judge", action="store_true", 
                        help="Skip LLM judge evaluation")
     parser.add_argument("--skip-viz", action="store_true", 
@@ -332,7 +356,7 @@ async def main():
     # Run full benchmark
     success = await orchestrator.run_full_benchmark(
         skip_legal=args.skip_legal,
-        skip_gpt4=args.skip_gpt4, 
+        skip_o3=args.skip_o3, 
         skip_judge=args.skip_judge,
         skip_viz=args.skip_viz
     )
