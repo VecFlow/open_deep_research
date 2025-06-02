@@ -14,9 +14,26 @@ from linkup import LinkupClient
 from tavily import AsyncTavilyClient
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents.aio import SearchClient as AsyncAzureAISearchClient
-import weaviate
-from weaviate import WeaviateAsyncClient
-import weaviate.auth
+try:
+    import weaviate
+    # Weaviate v4 imports
+    try:
+        from weaviate import WeaviateAsyncClient
+        import weaviate.classes as wvc
+        WEAVIATE_V4_AVAILABLE = True
+        WEAVIATE_AVAILABLE = True
+        print("✅ Weaviate v4 client available")
+    except ImportError as e:
+        # Fallback indication
+        WeaviateAsyncClient = None
+        WEAVIATE_V4_AVAILABLE = False
+        WEAVIATE_AVAILABLE = False
+        print(f"❌ Weaviate v4 not available: {e}")
+except ImportError:
+    WEAVIATE_AVAILABLE = False
+    WEAVIATE_V4_AVAILABLE = False
+    WeaviateAsyncClient = None
+    print("❌ Weaviate not available")
 import asyncio
 import os
 from duckduckgo_search import DDGS 
@@ -207,6 +224,19 @@ async def azureaisearch_search_async(search_queries: list[str], max_results: int
         List[dict]: list of search responses from Weaviate, one per query.
     """
     print(f"max_results: {max_results}")
+    
+    # Check if Weaviate v4 is available
+    if not WEAVIATE_V4_AVAILABLE:
+        print("⚠️ Weaviate v4 not available - returning empty search results")
+        print("📝 Document search will be skipped, but analysis will continue")
+        # Return empty results for each query to maintain compatibility
+        return [{
+            "query": query,
+            "results": [],
+            "status": "skipped",
+            "message": "Document search unavailable with Weaviate v3"
+        } for query in search_queries]
+    
     # Define filters inside the function
     # You can modify this filters variable as needed
     filters = {"data_source_id": "e89cb0a2-2187-489e-b942-9154faa7c3f0"}  # Example: {"data_source_id": "source123"} or {"data_source_id": ["source1", "source2"]}
@@ -236,7 +266,7 @@ async def azureaisearch_search_async(search_queries: list[str], max_results: int
     is_weaviate_cloud = '.weaviate.cloud' in parsed_url.hostname or '.weaviate.network' in parsed_url.hostname
     
     if is_weaviate_cloud:
-        # For Weaviate Cloud, use the helper function
+        # For Weaviate Cloud, use the v4 helper function
         async_client = weaviate.use_async_with_weaviate_cloud(
             cluster_url=weaviate_url,
             auth_credentials=weaviate.auth.Auth.api_key(weaviate_api_key),

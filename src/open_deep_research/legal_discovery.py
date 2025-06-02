@@ -115,8 +115,8 @@ async def generate_analysis_plan(state: LegalAnalysisState, config: RunnableConf
                         Each category must have: name, description, requires_document_search, and content fields."""
 
     # Run the planner
-    if planner_model == "claude-3-5-sonnet-latest":
-        # Allocate a thinking budget for claude-3-5-sonnet-latest as the planner model
+    if planner_model in ["claude-3-5-sonnet-latest", "claude-4-sonnet"]:
+        # Allocate a thinking budget for claude-3-5-sonnet-latest and claude-4-sonnet as the planner model
         planner_llm = init_chat_model(model=planner_model, 
                                       model_provider=planner_provider, 
                                       max_tokens=20_000, 
@@ -336,8 +336,8 @@ async def analyze_category(state: CategoryState, config: RunnableConfig) -> Comm
     planner_model = get_config_value(configurable.planner_model)
     planner_model_kwargs = get_config_value(configurable.planner_model_kwargs or {})
 
-    if planner_model == "claude-3-5-sonnet-latest":
-        # Allocate a thinking budget for claude-3-5-sonnet-latest as the planner model
+    if planner_model in ["claude-3-5-sonnet-latest", "claude-4-sonnet"]:
+        # Allocate a thinking budget for claude-3-5-sonnet-latest and claude-4-sonnet as the planner model
         reflection_model = init_chat_model(
             model=planner_model, 
             model_provider=planner_provider, 
