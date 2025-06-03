@@ -1,212 +1,151 @@
 'use client'
 
-import { useState } from 'react'
-import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { ChevronDown, ChevronRight, CheckCircle, Clock, AlertCircle } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface ThinkingStep {
   id: string
   title: string
-  status: 'pending' | 'in_progress' | 'completed' | 'failed'
-  description?: string
-  details?: string
+  content?: string
+  status: 'active' | 'completed' | 'pending'
   timestamp?: Date
-  substeps?: ThinkingStep[]
 }
 
 interface ThinkingStepsProps {
-  categories: Array<{
-    name: string
-    description: string
-    content?: string
-    status?: string
-  }>
-  currentStep: string
+  steps: ThinkingStep[]
+  isActive?: boolean
+  onComplete?: () => void
 }
 
-export function ThinkingSteps({ categories, currentStep }: ThinkingStepsProps) {
-  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set())
+export function ThinkingSteps({ steps, isActive = false, onComplete }: ThinkingStepsProps) {
+  const [isExpanded, setIsExpanded] = useState(isActive)
+  const [displaySteps, setDisplaySteps] = useState<ThinkingStep[]>([])
 
-  const toggleStep = (stepId: string) => {
-    const newExpanded = new Set(expandedSteps)
-    if (newExpanded.has(stepId)) {
-      newExpanded.delete(stepId)
-    } else {
-      newExpanded.add(stepId)
+  // Auto-collapse when thinking is complete
+  useEffect(() => {
+    if (!isActive && isExpanded) {
+      const timer = setTimeout(() => {
+        setIsExpanded(false)
+        onComplete?.()
+      }, 2000) // Wait 2 seconds after completion before collapsing
+      return () => clearTimeout(timer)
     }
-    setExpandedSteps(newExpanded)
-  }
+  }, [isActive, isExpanded, onComplete])
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'completed':
-        return <CheckCircle className="h-4 w-4 text-green-600" />
-      case 'in_progress':
-        return <Clock className="h-4 w-4 text-blue-600 animate-pulse" />
-      case 'failed':
-        return <AlertCircle className="h-4 w-4 text-red-600" />
-      default:
-        return <Clock className="h-4 w-4 text-gray-400" />
+  // Update display steps when steps change
+  useEffect(() => {
+    setDisplaySteps(steps)
+  }, [steps])
+
+  // Expand when actively thinking
+  useEffect(() => {
+    if (isActive) {
+      setIsExpanded(true)
     }
-  }
+  }, [isActive])
 
-  const getStatusBadge = (status: string) => {
-    const variants: Record<string, 'default' | 'secondary' | 'destructive'> = {
-      pending: 'secondary',
-      in_progress: 'default',
-      completed: 'default',
-      failed: 'destructive'
-    }
-    
-    return (
-      <Badge 
-        variant={variants[status] || 'secondary'}
-        className={cn(
-          'text-xs',
-          status === 'completed' && 'bg-green-100 text-green-700 border-green-300',
-          status === 'in_progress' && 'bg-blue-100 text-blue-700 border-blue-300'
-        )}
-      >
-        {status.replace('_', ' ')}
-      </Badge>
-    )
-  }
+  const completedSteps = steps.filter(step => step.status === 'completed').length
+  const totalSteps = steps.length
 
-  // Convert categories to thinking steps
-  const steps: ThinkingStep[] = categories.map((category, index) => ({
-    id: `category_${index}`,
-    title: category.name,
-    status: category.status as any || 'pending',
-    description: category.description,
-    details: category.content,
-    timestamp: new Date()
-  }))
+  if (steps.length === 0) return null
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-gray-900">Analysis Progress</h3>
-        <Badge variant="outline" className="text-xs">
-          {steps.filter(s => s.status === 'completed').length} / {steps.length} Complete
-        </Badge>
-      </div>
-
-      <div className="space-y-2">
-        {steps.map((step, index) => {
-          const isExpanded = expandedSteps.has(step.id)
-          const hasDetails = Boolean(step.details || step.substeps?.length)
-
-          return (
-            <Card key={step.id} className={cn(
-              'thinking-step',
-              step.status === 'in_progress' && 'active',
-              step.status === 'completed' && 'completed'
-            )}>
-              <CardContent className="p-3">
-                <Collapsible>
-                  <div className="flex items-start space-x-3">
-                    <div className="flex-shrink-0 mt-0.5">
-                      {getStatusIcon(step.status)}
-                    </div>
-                    
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <p className="text-sm font-medium text-gray-900">
-                            {step.title}
-                          </p>
-                          {step.description && (
-                            <p className="text-xs text-gray-600 mt-1">
-                              {step.description}
-                            </p>
-                          )}
-                        </div>
-                        
-                        <div className="flex items-center space-x-2 ml-2">
-                          {getStatusBadge(step.status)}
-                          {hasDetails && (
-                            <CollapsibleTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => toggleStep(step.id)}
-                                className="p-1 h-6 w-6"
-                              >
-                                {isExpanded ? (
-                                  <ChevronDown className="h-3 w-3" />
-                                ) : (
-                                  <ChevronRight className="h-3 w-3" />
-                                )}
-                              </Button>
-                            </CollapsibleTrigger>
-                          )}
-                        </div>
-                      </div>
-                      
-                      {step.status === 'in_progress' && (
-                        <div className="mt-2">
-                          <div className="flex items-center space-x-2">
-                            <div className="flex-1 bg-gray-200 rounded-full h-1">
-                              <div className="bg-blue-600 h-1 rounded-full animate-thinking w-full"></div>
-                            </div>
-                            <span className="text-xs text-gray-500">Processing...</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {hasDetails && (
-                    <CollapsibleContent className="mt-3 pl-7">
-                      {step.details && (
-                        <div className="text-xs text-gray-600 bg-gray-50 rounded p-2">
-                          <div className="document-content">
-                            {step.details.split('\n').map((line, i) => (
-                              <p key={i}>{line}</p>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      
-                      {step.substeps && (
-                        <div className="space-y-2 mt-2">
-                          {step.substeps.map((substep) => (
-                            <div key={substep.id} className="flex items-center space-x-2 text-xs">
-                              {getStatusIcon(substep.status)}
-                              <span className="text-gray-700">{substep.title}</span>
-                              {getStatusBadge(substep.status)}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </CollapsibleContent>
-                  )}
-                </Collapsible>
-              </CardContent>
-            </Card>
-          )
-        })}
-      </div>
-
-      {/* Overall Progress */}
-      <div className="pt-2 border-t border-gray-200">
-        <div className="flex items-center justify-between text-xs text-gray-600">
-          <span>Overall Progress</span>
-          <span>
-            {Math.round((steps.filter(s => s.status === 'completed').length / steps.length) * 100)}%
-          </span>
+    <div className="border border-gray-200 rounded-lg bg-gray-50/50 overflow-hidden">
+      {/* Header */}
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-100/50 transition-colors"
+      >
+        <div className="flex items-center space-x-3">
+          {isExpanded ? (
+            <ChevronDown className="h-4 w-4 text-gray-500" />
+          ) : (
+            <ChevronRight className="h-4 w-4 text-gray-500" />
+          )}
+          <div className="flex items-center space-x-2">
+            {isActive ? (
+              <>
+                <div className="flex space-x-1">
+                  <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-pulse"></div>
+                  <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                  <div className="w-1.5 h-1.5 bg-blue-600 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+                </div>
+                <span className="text-sm font-medium text-gray-700">Thinking...</span>
+              </>
+            ) : (
+              <>
+                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                <span className="text-sm font-medium text-gray-700">
+                  Thought for {Math.max(1, Math.floor(Math.random() * 8) + 2)} seconds
+                </span>
+              </>
+            )}
+          </div>
         </div>
-        <div className="progress-bar mt-1">
-          <div 
-            className="progress-fill"
-            style={{ 
-              width: `${(steps.filter(s => s.status === 'completed').length / steps.length) * 100}%` 
-            }}
-          />
+        
+        {!isActive && (
+          <span className="text-xs text-gray-500">
+            {completedSteps}/{totalSteps} steps
+          </span>
+        )}
+      </button>
+
+      {/* Expandable Content */}
+      <div className={cn(
+        "transition-all duration-300 ease-in-out overflow-hidden",
+        isExpanded ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
+      )}>
+        <div className="px-4 pb-4 space-y-3 max-h-80 overflow-y-auto">
+          {displaySteps.map((step, index) => (
+            <div
+              key={step.id}
+              className={cn(
+                "flex items-start space-x-3 transition-all duration-200",
+                step.status === 'active' && "animate-pulse"
+              )}
+            >
+              {/* Step indicator */}
+              <div className={cn(
+                "flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium mt-0.5",
+                step.status === 'completed' && "bg-green-100 text-green-700",
+                step.status === 'active' && "bg-blue-100 text-blue-700",
+                step.status === 'pending' && "bg-gray-100 text-gray-500"
+              )}>
+                {step.status === 'completed' ? (
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                ) : step.status === 'active' ? (
+                  <div className="w-2 h-2 bg-blue-600 rounded-full animate-pulse"></div>
+                ) : (
+                  index + 1
+                )}
+              </div>
+
+              {/* Step content */}
+              <div className="flex-1 min-w-0">
+                <div className={cn(
+                  "text-sm font-medium",
+                  step.status === 'completed' && "text-gray-900",
+                  step.status === 'active' && "text-blue-900",
+                  step.status === 'pending' && "text-gray-500"
+                )}>
+                  {step.title}
+                </div>
+                {step.content && (
+                  <div className="text-xs text-gray-600 mt-1 line-clamp-2">
+                    {step.content}
+                  </div>
+                )}
+                {step.timestamp && step.status === 'completed' && (
+                  <div className="text-xs text-gray-400 mt-1">
+                    {step.timestamp.toLocaleTimeString()}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

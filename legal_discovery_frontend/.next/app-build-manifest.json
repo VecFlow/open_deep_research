@@ -24,6 +24,7 @@
     "/(dashboard)/cases/[id]/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
+      "static/css/app/(dashboard)/cases/[id]/page.css",
       "static/chunks/app/(dashboard)/cases/[id]/page.js"
     ]
   }

@@ -2,18 +2,14 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
-import { Badge } from '@/components/ui/badge'
-import { FeedbackButtons } from './feedback-buttons'
 import { ThinkingSteps } from './thinking-steps'
-import { CategoryProgress } from './category-progress'
-import { CommentsPanel } from './comments-panel'
+import { FeedbackButtons } from './feedback-buttons'
+import { MarkdownRenderer } from '@/components/ui/markdown-renderer'
 import { useCaseAnalysis } from '@/lib/cases/queries'
 import { useAnalysisWorkflow } from '@/lib/analysis/queries'
 import { useWorkflowControl, useStartAnalysis } from '@/lib/analysis/mutations'
-import { Send, Pause, Play, Square, MessageCircle } from 'lucide-react'
+import { Send, Play, Pause, Square, Sparkles, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface ChatInterfaceProps {
@@ -26,14 +22,22 @@ interface ChatMessage {
   content: string
   timestamp: Date
   metadata?: any
+  thinkingSteps?: Array<{
+    id: string
+    title: string
+    content?: string
+    status: 'active' | 'completed' | 'pending'
+    timestamp?: Date
+  }>
+  isThinking?: boolean
 }
 
 export function ChatInterface({ caseId }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [isConnected, setIsConnected] = useState(false)
-  const [showComments, setShowComments] = useState(false)
-  const [analysisResults, setAnalysisResults] = useState<any>(null)
+  const [currentThinkingSteps, setCurrentThinkingSteps] = useState<any[]>([])
+  const [isThinking, setIsThinking] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   
   const { data: caseData } = useCaseAnalysis(caseId)
@@ -48,7 +52,7 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
-  
+
   // WebSocket connection for real-time updates
   useEffect(() => {
     const clientId = `client_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -56,7 +60,6 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
     
     ws.onopen = () => {
       setIsConnected(true)
-      // Subscribe to case updates
       ws.send(JSON.stringify({ 
         type: 'subscribe_case', 
         case_id: caseId 
@@ -65,7 +68,6 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
     
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data)
-      console.log('🔍 WebSocket message received:', data)
       handleWorkflowUpdate(data)
     }
     
@@ -77,73 +79,65 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
       ws.close()
     }
   }, [caseId])
-  
+
   const handleWorkflowUpdate = (update: any) => {
-    console.log('🔄 Processing workflow update:', update)
     const messageId = `msg_${Date.now()}`
     
+    // Handle thinking steps for progress updates
+    if (update.type === 'progress_update' && update.message) {
+      const step = {
+        id: `step_${Date.now()}`,
+        title: update.message,
+        status: 'active' as const,
+        timestamp: new Date()
+      }
+      
+      setIsThinking(true)
+      setCurrentThinkingSteps(prev => [...prev, step])
+      return
+    }
+
+    // Handle other message types
     let content = ''
-    let type: 'assistant' | 'system' = 'assistant'
+    let type: 'assistant' | 'system' | 'user' = 'system'
     let shouldCreateMessage = true
     
     switch (update.type) {
-      case 'plan_generated':
-        content = `Analysis plan generated with ${update.total_categories} categories.`
-        type = 'system'
-        break
       case 'feedback_requested':
         content = update.message
         type = 'system'
+        setIsThinking(false)
+        // Mark all current thinking steps as completed
+        setCurrentThinkingSteps(prev => 
+          prev.map(step => ({ ...step, status: 'completed' as const }))
+        )
         break
-      case 'category_completed':
-        content = `Completed analysis for: ${update.categories.map((c: any) => c.name).join(', ')}`
-        type = 'system'
-        break
-      case 'deposition_generated':
-        content = 'Deposition questions have been generated.'
-        type = 'system'
-        break
+        
       case 'analysis_completed':
-        // Display the final analysis content instead of just a summary
         const analysisContent = update.final_analysis || 'Analysis completed but no content received.'
         const completedCount = update.completed_categories?.length || 0
         const depositionQuestions = update.deposition_questions
         
-        // Store the analysis results for the progress display
-        setAnalysisResults({
-          completed_categories: update.completed_categories || [],
-          total_categories: completedCount,
-          final_analysis: update.final_analysis,
-          deposition_questions: update.deposition_questions
-        })
+        content = `# Legal Analysis Complete\n\n**Categories Analyzed:** ${completedCount}\n\n## Analysis Results\n\n${analysisContent}`
         
-        content = `🎉 **Legal Analysis Complete!**\n\n**Categories Analyzed:** ${completedCount}\n\n**Analysis Results:**\n\n${analysisContent}`
-        
-        // Add deposition questions if available
-        if (depositionQuestions && typeof depositionQuestions === 'string') {
-          content += `\n\n**Deposition Questions:**\n\n${depositionQuestions}`
-        } else if (depositionQuestions && typeof depositionQuestions === 'object') {
-          content += `\n\n**Deposition Questions:**\n\n${JSON.stringify(depositionQuestions, null, 2)}`
+        if (depositionQuestions) {
+          if (typeof depositionQuestions === 'string') {
+            content += `\n\n## Deposition Questions\n\n${depositionQuestions}`
+          } else if (typeof depositionQuestions === 'object') {
+            content += `\n\n## Deposition Questions\n\n\`\`\`json\n${JSON.stringify(depositionQuestions, null, 2)}\n\`\`\``
+          }
         }
         
         type = 'assistant'
+        setIsThinking(false)
+        setCurrentThinkingSteps(prev => 
+          prev.map(step => ({ ...step, status: 'completed' as const }))
+        )
         break
-      case 'progress_update':
+        
+      default:
         if (update.message) {
           content = update.message
-          type = 'system'
-        } else {
-          shouldCreateMessage = false
-        }
-        break
-      case 'error':
-        content = `Error: ${update.message}`
-        type = 'system'
-        break
-      default:
-        // Only create messages for known types or those with explicit content
-        if (update.message) {
-          content = `Workflow update: ${update.type}`
           type = 'system'
         } else {
           shouldCreateMessage = false
@@ -151,18 +145,28 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
     }
     
     if (shouldCreateMessage && content) {
+      // If we have thinking steps, attach them to this message
+      const finalThinkingSteps = isThinking ? [] : currentThinkingSteps
+      
       const newMessage: ChatMessage = {
         id: messageId,
         type,
         content,
         timestamp: new Date(),
-        metadata: update
+        metadata: update,
+        thinkingSteps: finalThinkingSteps.length > 0 ? finalThinkingSteps : undefined,
+        isThinking: false
       }
       
       setMessages(prev => [...prev, newMessage])
+      
+      // Clear thinking steps after attaching them
+      if (!isThinking) {
+        setCurrentThinkingSteps([])
+      }
     }
   }
-  
+
   const handleSendMessage = async () => {
     if (!input.trim()) return
     
@@ -175,17 +179,15 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
     
     setMessages(prev => [...prev, userMessage])
     
-    // Handle different types of user input
     if (input.toLowerCase().includes('start analysis')) {
       await handleStartAnalysis()
     } else {
-      // Handle as feedback or comment
       await handleUserFeedback(input)
     }
     
     setInput('')
   }
-  
+
   const handleStartAnalysis = async () => {
     try {
       await startAnalysis.mutateAsync(caseId)
@@ -202,17 +204,14 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
       console.error('Failed to start analysis:', error)
     }
   }
-  
+
   const handleUserFeedback = async (feedback: string) => {
     try {
       const analysisId = caseData?.analyses?.[0]?.id
-      if (!analysisId) {
-        console.error('No analysis ID found')
-        return
-      }
+      if (!analysisId) return
       
       await workflowControl.mutateAsync({
-        caseId: analysisId, // Use analysisId instead of caseId
+        caseId: analysisId,
         action: 'feedback',
         feedback
       })
@@ -220,43 +219,14 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
       console.error('Failed to send feedback:', error)
     }
   }
-  
-  const handleWorkflowControl = async (action: 'pause' | 'resume' | 'stop') => {
-    try {
-      const analysisId = caseData?.analyses?.[0]?.id
-      if (!analysisId) {
-        console.error('No analysis ID found')
-        return
-      }
-      
-      await workflowControl.mutateAsync({
-        caseId: analysisId, // Use analysisId instead of caseId
-        action
-      })
-      
-      const systemMessage: ChatMessage = {
-        id: `system_${Date.now()}`,
-        type: 'system',
-        content: `Workflow ${action}ed.`,
-        timestamp: new Date()
-      }
-      
-      setMessages(prev => [...prev, systemMessage])
-    } catch (error) {
-      console.error(`Failed to ${action} workflow:`, error)
-    }
-  }
-  
+
   const handleFeedbackSubmit = async (feedback: string, approved: boolean) => {
     try {
       const analysisId = caseData?.analyses?.[0]?.id
-      if (!analysisId) {
-        console.error('No analysis ID found')
-        return
-      }
+      if (!analysisId) return
       
       await workflowControl.mutateAsync({
-        caseId: analysisId, // Use analysisId instead of caseId
+        caseId: analysisId,
         action: 'feedback',
         feedback,
         approve: approved
@@ -274,154 +244,174 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
       console.error('Failed to provide feedback:', error)
     }
   }
-  
+
   return (
-    <div className="h-full flex">
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <div className="border-b border-gray-200 p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <h2 className="text-lg font-semibold text-gray-900">
-                Legal Analysis Chat
-              </h2>
-              <Badge 
-                variant={isConnected ? 'default' : 'destructive'}
-                className="text-xs"
-              >
-                {isConnected ? 'Connected' : 'Disconnected'}
-              </Badge>
-            </div>
-            
+    <div className="flex flex-col h-full bg-white">
+      {/* Header */}
+      <div className="flex-shrink-0 border-b border-gray-200 bg-white px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
             <div className="flex items-center space-x-2">
-              {/* Show Start Analysis button if no analysis has started */}
-              {(!workflowStatus || workflowStatus.status === 'draft' || workflowStatus.status === 'pending') && (
-                <Button
-                  size="sm"
-                  onClick={handleStartAnalysis}
-                  className="bg-blue-600 hover:bg-blue-700"
-                >
-                  <Play className="h-4 w-4 mr-1" />
-                  Start Analysis
-                </Button>
-              )}
-              
-              {workflowStatus?.status === 'in_progress' && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleWorkflowControl('pause')}
-                >
-                  <Pause className="h-4 w-4 mr-1" />
-                  Pause
-                </Button>
-              )}
-              
-              {workflowStatus?.status === 'paused' && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleWorkflowControl('resume')}
-                >
-                  <Play className="h-4 w-4 mr-1" />
-                  Resume
-                </Button>
-              )}
-              
-              {(workflowStatus?.status === 'in_progress' || workflowStatus?.status === 'paused') && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleWorkflowControl('stop')}
-                >
-                  <Square className="h-4 w-4 mr-1" />
-                  Stop
-                </Button>
-              )}
-              
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowComments(!showComments)}
-              >
-                <MessageCircle className="h-4 w-4 mr-1" />
-                Comments
-              </Button>
+              <Sparkles className="h-5 w-5 text-blue-600" />
+              <h1 className="text-lg font-semibold text-gray-900">Legal Analysis</h1>
+            </div>
+            <div className={cn(
+              "inline-flex items-center px-2 py-1 rounded-full text-xs font-medium",
+              isConnected 
+                ? "bg-green-100 text-green-700" 
+                : "bg-red-100 text-red-700"
+            )}>
+              <div className={cn(
+                "w-2 h-2 rounded-full mr-1.5",
+                isConnected ? "bg-green-500" : "bg-red-500"
+              )} />
+              {isConnected ? 'Connected' : 'Disconnected'}
             </div>
           </div>
+          
+          <div className="flex items-center space-x-2">
+            {(!workflowStatus || workflowStatus.status === 'draft' || workflowStatus.status === 'pending') && (
+              <Button
+                size="sm"
+                onClick={handleStartAnalysis}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <Play className="h-4 w-4 mr-1" />
+                Start Analysis
+              </Button>
+            )}
+            
+            {workflowStatus?.status === 'in_progress' && (
+              <Button variant="outline" size="sm">
+                <Pause className="h-4 w-4 mr-1" />
+                Pause
+              </Button>
+            )}
+          </div>
         </div>
-        
-        {/* Messages */}
-        <ScrollArea className="flex-1 p-4">
-          <div className="space-y-4">
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-hidden">
+        <div className="h-full overflow-y-auto px-6 py-6">
+          <div className="max-w-4xl mx-auto space-y-6">
             {messages.length === 0 && (
-              <div className="text-center py-8">
-                <p className="text-gray-500">
-                  Start a conversation to begin your legal analysis
+              <div className="text-center py-12">
+                <Sparkles className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  Ready to analyze your case
+                </h3>
+                <p className="text-gray-500 mb-6">
+                  Start a conversation to begin your comprehensive legal analysis
                 </p>
                 <Button
-                  className="mt-4"
                   onClick={() => setInput('Start analysis for this case')}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
                 >
+                  <Play className="h-4 w-4 mr-2" />
                   Start Analysis
                 </Button>
               </div>
             )}
             
             {messages.map((message) => (
-              <div
-                key={message.id}
-                className={cn(
-                  'chat-message',
-                  message.type === 'user' && 'user',
-                  message.type === 'assistant' && 'assistant',
-                  message.type === 'system' && 'system'
-                )}
-              >
-                <div className="flex items-start space-x-3">
-                  <div className="flex-1">
-                    <p className="text-sm">{message.content}</p>
-                    <span className="text-xs text-gray-400 mt-1">
+              <div key={message.id} className="group">
+                {/* Message */}
+                <div className={cn(
+                  "flex items-start space-x-4",
+                  message.type === 'user' && "flex-row-reverse space-x-reverse"
+                )}>
+                  {/* Avatar */}
+                  <div className={cn(
+                    "flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium",
+                    message.type === 'user' 
+                      ? "bg-blue-600 text-white" 
+                      : message.type === 'assistant'
+                      ? "bg-green-100 text-green-700"
+                      : "bg-gray-100 text-gray-600"
+                  )}>
+                    {message.type === 'user' ? 'U' : message.type === 'assistant' ? 'A' : 'S'}
+                  </div>
+                  
+                  {/* Content */}
+                  <div className={cn(
+                    "flex-1 space-y-3",
+                    message.type === 'user' && "text-right"
+                  )}>
+                    {/* Thinking Steps */}
+                    {message.thinkingSteps && message.thinkingSteps.length > 0 && (
+                      <ThinkingSteps 
+                        steps={message.thinkingSteps}
+                        isActive={false}
+                      />
+                    )}
+                    
+                    {/* Message Content */}
+                    <div className={cn(
+                      "prose prose-gray max-w-none",
+                      message.type === 'user' && "text-right"
+                    )}>
+                      {message.type === 'assistant' ? (
+                        <MarkdownRenderer content={message.content} />
+                      ) : (
+                        <p className="text-gray-700 leading-relaxed">
+                          {message.content}
+                        </p>
+                      )}
+                    </div>
+                    
+                    {/* Feedback Buttons */}
+                    {message.metadata?.type === 'feedback_requested' && (
+                      <div className="mt-4">
+                        <FeedbackButtons
+                          onFeedback={handleFeedbackSubmit}
+                          categories={message.metadata?.categories || []}
+                        />
+                      </div>
+                    )}
+                    
+                    {/* Timestamp */}
+                    <div className={cn(
+                      "text-xs text-gray-400",
+                      message.type === 'user' && "text-right"
+                    )}>
                       {message.timestamp.toLocaleTimeString()}
-                    </span>
+                    </div>
                   </div>
                 </div>
-                
-                {/* Show feedback buttons for feedback requests */}
-                {message.metadata?.type === 'feedback_requested' && (
-                  <div className="mt-3">
-                    <FeedbackButtons
-                      onFeedback={handleFeedbackSubmit}
-                      categories={message.metadata?.categories || caseData?.analyses?.[0]?.categories || []}
-                    />
-                  </div>
-                )}
-                
-                {/* Show thinking steps for analysis updates */}
-                {message.metadata?.type === 'category_completed' && (
-                  <div className="mt-3">
-                    <ThinkingSteps
-                      categories={message.metadata.categories}
-                      currentStep="analysis"
-                    />
-                  </div>
-                )}
               </div>
             ))}
+            
+            {/* Active Thinking Steps */}
+            {isThinking && currentThinkingSteps.length > 0 && (
+              <div className="flex items-start space-x-4">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-medium">
+                  A
+                </div>
+                <div className="flex-1">
+                  <ThinkingSteps 
+                    steps={currentThinkingSteps}
+                    isActive={true}
+                  />
+                </div>
+              </div>
+            )}
+            
             <div ref={messagesEndRef} />
           </div>
-        </ScrollArea>
-        
-        {/* Input */}
-        <div className="border-t border-gray-200 p-4">
-          <div className="flex space-x-2">
+        </div>
+      </div>
+
+      {/* Input */}
+      <div className="flex-shrink-0 border-t border-gray-200 bg-white px-6 py-4">
+        <div className="max-w-4xl mx-auto">
+          <div className="relative">
             <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Type your message or provide feedback..."
-              className="flex-1 resize-none"
-              rows={3}
+              placeholder="Message Legal AI..."
+              className="w-full resize-none border-gray-300 rounded-xl pr-12 py-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              rows={1}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
@@ -432,39 +422,16 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
             <Button 
               onClick={handleSendMessage}
               disabled={!input.trim() || !isConnected}
+              size="sm"
+              className="absolute right-2 bottom-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg"
             >
               <Send className="h-4 w-4" />
             </Button>
           </div>
-        </div>
-      </div>
-      
-      {/* Side Panel */}
-      <div className="w-80 border-l border-gray-200 flex flex-col">
-        {/* Category Progress */}
-        <div className="border-b border-gray-200 p-4">
-          <h3 className="text-sm font-medium text-gray-900 mb-3">
-            Analysis Progress
-          </h3>
-          <CategoryProgress 
-            categories={analysisResults?.completed_categories || caseData?.analyses?.[0]?.categories || []}
-            progress={analysisResults ? 
-              analysisResults.completed_categories.map((cat: any, index: number) => ({
-                category: cat.name || `Category ${index + 1}`,
-                status: 'completed',
-                content: cat.content || ''
-              })) : 
-              (caseData?.analyses?.[0]?.category_progress || [])
-            }
-          />
-        </div>
-        
-        {/* Comments Panel */}
-        {showComments && (
-          <div className="flex-1">
-            <CommentsPanel caseId={caseId} />
+          <div className="text-xs text-gray-500 mt-2 text-center">
+            Legal AI can make mistakes. Consider checking important information.
           </div>
-        )}
+        </div>
       </div>
     </div>
   )

@@ -34,6 +34,7 @@ try:
     from .websocket_manager import WebSocketManager
     from .document_service import DocumentService
     from .export_service import ExportService
+    from .conversations_api import router as conversations_router
 except ImportError:
     # Handle relative imports when running directly
     import sys
@@ -52,6 +53,7 @@ except ImportError:
     from websocket_manager import WebSocketManager
     from document_service import DocumentService
     from export_service import ExportService
+    from conversations_api import router as conversations_router
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -106,6 +108,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include API routers
+app.include_router(conversations_router, prefix="/api/v1")
 
 # Dependency for database session
 def get_db() -> Session:

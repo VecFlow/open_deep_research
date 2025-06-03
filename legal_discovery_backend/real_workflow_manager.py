@@ -7,9 +7,12 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Set
 from dataclasses import dataclass
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
+import traceback
+import json
 
 # Import LangGraph components
 import sys
@@ -26,13 +29,17 @@ from open_deep_research.configuration import Configuration
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.types import Command
+from database_models import CaseDB, AnalysisDB, ConversationDB, MessageDB, get_db, init_database
+from langchain_core.runnables import RunnableConfig
+from langgraph.pregel import Pregel
+from langgraph.errors import GraphInterrupt
 
 try:
-    from .models import AnalysisDB, AnalysisCategory as AnalysisCategoryModel
+    from .models import AnalysisDB, AnalysisCategory as AnalysisCategoryModel, WebSocketMessage
     from .websocket_manager import WebSocketManager
     from .database import get_db_session
 except ImportError:
-    from models import AnalysisDB, AnalysisCategory as AnalysisCategoryModel
+    from models import AnalysisDB, AnalysisCategory as AnalysisCategoryModel, WebSocketMessage
     from websocket_manager import WebSocketManager
     from database import get_db_session
 
@@ -394,7 +401,7 @@ class RealWorkflowManager:
                 progress_percentage=progress,
                 categories_completed=len(completed_categories),
                 total_categories=len(categories),
-                message=f"Processing step: {current_node.replace('_', ' ').title()}"
+                message=f"{current_node.replace('_', ' ').title()}"
             )
             
         except Exception as e:
@@ -658,10 +665,10 @@ class RealWorkflowManager:
             )
             
             # Send detailed completion update with categories
-            await self._send_completion_update(
+            await self._send_analysis_completion(
                 analysis_id=analysis_id,
-                completed_categories=completed_categories_dict,
                 final_analysis=final_analysis,
+                completed_categories=completed_categories_dict,
                 deposition_questions=deposition_questions
             )
             
@@ -672,40 +679,46 @@ class RealWorkflowManager:
             import traceback
             logger.error(f"📋 Completion error traceback:\n{traceback.format_exc()}")
     
-    async def _send_completion_update(
-        self,
-        analysis_id: str,
-        completed_categories: List[Dict[str, Any]],
+    async def _send_analysis_completion(
+        self, 
+        analysis_id: str, 
         final_analysis: str,
-        deposition_questions: Any = None
+        completed_categories: List[Dict[str, Any]],
+        deposition_questions: Optional[Any] = None
     ) -> None:
-        """Send detailed completion update with results."""
+        """Send analysis completion via WebSocket and save to conversation."""
         try:
-            if not self.websocket_manager:
-                return
-            
-            execution = self.active_workflows.get(analysis_id)
-            if not execution:
-                return
-            
             completion_data = {
                 "type": "analysis_completed",
                 "analysis_id": analysis_id,
-                "completed_categories": completed_categories,
                 "final_analysis": final_analysis,
+                "completed_categories": completed_categories,
                 "deposition_questions": deposition_questions,
                 "timestamp": datetime.utcnow().isoformat()
             }
             
-            connection_count = await self.websocket_manager.broadcast_to_case(
-                case_id=execution.case_id,
-                message=completion_data
-            )
+            # Get case_id for broadcasting (frontend subscribes to case_id, not analysis_id)
+            execution = self.active_workflows.get(analysis_id)
+            case_id = execution.case_id if execution else analysis_id
             
-            logger.info(f"✅ Completion update sent to {connection_count} WebSocket clients")
+            # Send via WebSocket (pass raw data, not WebSocketMessage object)
+            await self.websocket_manager.broadcast_to_case(case_id, completion_data)
+            
+            # Create rich content for assistant message
+            categories_count = len(completed_categories)
+            content = f"# Legal Analysis Complete\n\n**Categories Analyzed:** {categories_count}\n\n## Analysis Results\n\n{final_analysis}"
+            
+            if deposition_questions:
+                if isinstance(deposition_questions, str):
+                    content += f"\n\n## Deposition Questions\n\n{deposition_questions}"
+                else:
+                    content += f"\n\n## Deposition Questions\n\n```json\n{json.dumps(deposition_questions, indent=2)}\n```"
+            
+            # Save to conversation as assistant message
+            await self._save_assistant_message(analysis_id, content, metadata=completion_data)
             
         except Exception as e:
-            logger.error(f"Error sending completion update for {analysis_id}: {e}")
+            logger.error(f"Failed to send analysis completion: {e}")
     
     async def _update_analysis_status(
         self,
@@ -822,15 +835,8 @@ class RealWorkflowManager:
         total_categories: int = 0,
         message: Optional[str] = None
     ) -> None:
-        """Send progress update via WebSocket."""
+        """Send progress update via WebSocket and save to conversation."""
         try:
-            if not self.websocket_manager:
-                return
-            
-            execution = self.active_workflows.get(analysis_id)
-            if not execution:
-                return
-            
             update_data = {
                 "type": "progress_update",
                 "analysis_id": analysis_id,
@@ -843,62 +849,141 @@ class RealWorkflowManager:
                 "timestamp": datetime.utcnow().isoformat()
             }
             
-            await self.websocket_manager.broadcast_to_case(
-                case_id=execution.case_id,
-                message=update_data
-            )
+            # Get case_id for broadcasting (frontend subscribes to case_id, not analysis_id)
+            execution = self.active_workflows.get(analysis_id)
+            case_id = execution.case_id if execution else analysis_id
+            
+            # Send via WebSocket (pass raw data, not WebSocketMessage object)
+            await self.websocket_manager.broadcast_to_case(case_id, update_data)
+            
+            # Save to conversation if message exists
+            if message:
+                await self._save_system_message(analysis_id, message, update_data)
             
         except Exception as e:
-            logger.error(f"Error sending progress update for {analysis_id}: {e}")
+            logger.error(f"Failed to send progress update: {e}")
+
+    async def _save_system_message(self, analysis_id: str, content: str, metadata: Dict[str, Any] = None):
+        """Save a system message to the conversation."""
+        try:
+            # Get database session
+            with get_db() as db:
+                # Get or create conversation for this analysis
+                conversation = await self._get_or_create_conversation(db, analysis_id)
+                
+                # Create system message
+                message = MessageDB(
+                    conversation_id=conversation.id,
+                    type="system",
+                    content=content,
+                    message_metadata=metadata,
+                    created_at=datetime.utcnow()
+                )
+                
+                db.add(message)
+                
+                # Update conversation timestamp
+                conversation.updated_at = datetime.utcnow()
+                db.commit()
+                
+        except Exception as e:
+            logger.error(f"Failed to save system message: {e}")
+
+    async def _save_assistant_message(self, analysis_id: str, content: str, thinking_steps: List[Dict] = None, metadata: Dict[str, Any] = None):
+        """Save an assistant message with optional thinking steps."""
+        try:
+            # Get database session
+            with get_db() as db:
+                # Get or create conversation for this analysis
+                conversation = await self._get_or_create_conversation(db, analysis_id)
+                
+                # Create assistant message
+                message = MessageDB(
+                    conversation_id=conversation.id,
+                    type="assistant",
+                    content=content,
+                    message_metadata=metadata,
+                    thinking_steps=thinking_steps,
+                    created_at=datetime.utcnow()
+                )
+                
+                db.add(message)
+                
+                # Update conversation timestamp
+                conversation.updated_at = datetime.utcnow()
+                db.commit()
+                
+        except Exception as e:
+            logger.error(f"Failed to save assistant message: {e}")
+
+    async def _get_or_create_conversation(self, db: Session, analysis_id: str) -> ConversationDB:
+        """Get existing conversation or create new one for analysis."""
+        try:
+            # Get analysis to find case_id
+            analysis = db.query(AnalysisDB).filter(AnalysisDB.id == analysis_id).first()
+            if not analysis:
+                raise ValueError(f"Analysis {analysis_id} not found")
+            
+            # Look for existing conversation
+            conversation = db.query(ConversationDB).filter(
+                and_(
+                    ConversationDB.case_id == analysis.case_id,
+                    ConversationDB.analysis_id == analysis_id
+                )
+            ).first()
+            
+            if not conversation:
+                # Create new conversation
+                conversation = ConversationDB(
+                    case_id=analysis.case_id,
+                    analysis_id=analysis_id,
+                    title=f"Legal Analysis - {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}",
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
+                )
+                db.add(conversation)
+                db.commit()
+                db.refresh(conversation)
+            
+            return conversation
+            
+        except Exception as e:
+            logger.error(f"Failed to get/create conversation: {e}")
+            raise
     
     async def _send_feedback_request(
-        self,
-        analysis_id: str,
-        message: str,
-        categories: List[Any] = None
+        self, 
+        analysis_id: str, 
+        message: str, 
+        categories: Optional[List[Dict[str, Any]]] = None
     ) -> None:
-        """Send feedback request via WebSocket."""
+        """Send feedback request via WebSocket and save to conversation."""
         try:
-            logger.info(f"🔔 Sending feedback request for analysis {analysis_id}")
-            logger.info(f"📱 WebSocket manager available: {self.websocket_manager is not None}")
-            
-            if not self.websocket_manager:
-                logger.error(f"❌ No websocket_manager available for analysis {analysis_id}")
-                return
-            
-            execution = self.active_workflows.get(analysis_id)
-            if not execution:
-                logger.error(f"❌ No active workflow found for analysis {analysis_id}")
-                return
-            
-            logger.info(f"📋 Case ID for broadcast: {execution.case_id}")
-            logger.info(f"📦 Categories found: {len(categories) if categories else 0}")
-            if categories:
-                for i, cat in enumerate(categories):
-                    if hasattr(cat, 'name'):
-                        logger.info(f"  {i+1}. {cat.name}")
-                    else:
-                        logger.info(f"  {i+1}. {cat}")
-            
-            request_data = {
+            feedback_data = {
                 "type": "feedback_requested",
                 "analysis_id": analysis_id,
                 "message": message,
-                "categories": categories,
+                "categories": categories or [],
                 "timestamp": datetime.utcnow().isoformat()
             }
             
-            logger.info(f"📤 Broadcasting feedback request: {request_data}")
+            # Get case_id for broadcasting (frontend subscribes to case_id, not analysis_id)
+            execution = self.active_workflows.get(analysis_id)
+            case_id = execution.case_id if execution else analysis_id
             
-            connection_count = await self.websocket_manager.broadcast_to_case(
-                case_id=execution.case_id,
-                message=request_data
-            )
+            logger.info(f"🔔 Sending feedback request for analysis {analysis_id} to case {case_id}")
+            logger.info(f"📱 Feedback data: {feedback_data}")
             
-            logger.info(f"✅ Feedback request sent to {connection_count} WebSocket clients")
+            # Send via WebSocket (pass raw data, not WebSocketMessage object)
+            connection_count = await self.websocket_manager.broadcast_to_case(case_id, feedback_data)
+            
+            logger.info(f"✅ Feedback request sent to {connection_count} WebSocket clients for case {case_id}")
+            
+            # Save to conversation
+            await self._save_system_message(analysis_id, message, feedback_data)
             
         except Exception as e:
-            logger.error(f"Error sending feedback request for {analysis_id}: {e}")
+            logger.error(f"Failed to send feedback request: {e}")
             import traceback
             logger.error(f"📋 Feedback request error traceback:\n{traceback.format_exc()}")
     
