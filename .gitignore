@@ -1,6 +1,7 @@
 *.egg-info
 *.pyc
 .lang*
+*.next/
 
 # Python
 __pycache__/

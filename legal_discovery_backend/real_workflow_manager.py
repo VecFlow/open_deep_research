@@ -517,6 +517,11 @@ class RealWorkflowManager:
             logger.info(f"🏁 Completing workflow {analysis_id}")
             logger.info(f"📊 Final state keys: {list(final_state.keys()) if isinstance(final_state, dict) else 'Not a dict'}")
             
+            # Debug: log the full final state structure
+            if isinstance(final_state, dict):
+                for key, value in final_state.items():
+                    logger.info(f"🔍 Final state[{key}]: {type(value)} - {str(value)[:200]}...")
+            
             # Extract final results from workflow state (safely handle non-dict values)
             final_analysis = ""
             deposition_questions = None
@@ -530,8 +535,18 @@ class RealWorkflowManager:
                     if isinstance(final_content, dict):
                         final_analysis = final_content.get("final_analysis", "")
                         deposition_questions = final_content.get("deposition_questions")
+                        # Try to get categories from final content
                         completed_categories = final_content.get("completed_categories", [])
                         categories = final_content.get("categories", [])
+                        
+                        # If not found in final content, try to extract from the analysis text
+                        if not categories and not completed_categories:
+                            # Get from execution context if available
+                            execution = self.active_workflows.get(analysis_id)
+                            if execution and execution.last_state:
+                                if isinstance(execution.last_state, dict):
+                                    categories = execution.last_state.get("categories", [])
+                                    completed_categories = categories  # Assume all completed since we reached final analysis
                 elif 'final_analysis' in final_state:
                     final_analysis = final_state.get("final_analysis", "")
                     deposition_questions = final_state.get("deposition_questions")
@@ -543,15 +558,28 @@ class RealWorkflowManager:
                     deposition_questions = final_state.get("deposition_questions")
                     completed_categories = final_state.get("completed_categories", [])
                     categories = final_state.get("categories", [])
-                    
-                    # If no completed categories found, check if we have categories from execution state
-                    if not completed_categories and not categories:
-                        execution = self.active_workflows.get(analysis_id)
-                        if execution and execution.last_state:
-                            if isinstance(execution.last_state, dict):
-                                categories = execution.last_state.get("categories", [])
-                                # Assume all categories are completed if we reached the end
-                                completed_categories = categories
+                
+                # If still no categories found, get from execution state (since workflow completed all categories)
+                if not completed_categories and not categories:
+                    execution = self.active_workflows.get(analysis_id)
+                    if execution and execution.last_state:
+                        if isinstance(execution.last_state, dict):
+                            categories = execution.last_state.get("categories", [])
+                            # Since workflow completed successfully, all categories are completed
+                            completed_categories = categories
+                            logger.info(f"🔄 Retrieved {len(categories)} categories from execution state")
+                
+                # If we have final analysis but no categories, try to get from database
+                if final_analysis and not categories:
+                    try:
+                        analysis_db = db_session.query(AnalysisDB).filter(AnalysisDB.id == analysis_id).first()
+                        if analysis_db and analysis_db.categories:
+                            categories = analysis_db.categories
+                            # Since we completed successfully, mark all as completed
+                            completed_categories = categories
+                            logger.info(f"🔄 Retrieved {len(categories)} categories from database")
+                    except Exception as e:
+                        logger.warning(f"Could not retrieve categories from database: {e}")
             
             logger.info(f"📋 Final analysis length: {len(final_analysis) if final_analysis else 0}")
             logger.info(f"📂 Completed categories: {len(completed_categories)}")

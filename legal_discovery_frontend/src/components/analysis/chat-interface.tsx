@@ -33,6 +33,7 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
   const [input, setInput] = useState('')
   const [isConnected, setIsConnected] = useState(false)
   const [showComments, setShowComments] = useState(false)
+  const [analysisResults, setAnalysisResults] = useState<any>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   
   const { data: caseData } = useCaseAnalysis(caseId)
@@ -103,8 +104,29 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
         type = 'system'
         break
       case 'analysis_completed':
-        content = `Legal analysis completed! All ${update.completed_categories?.length || 0} categories have been analyzed.`
-        type = 'system'
+        // Display the final analysis content instead of just a summary
+        const analysisContent = update.final_analysis || 'Analysis completed but no content received.'
+        const completedCount = update.completed_categories?.length || 0
+        const depositionQuestions = update.deposition_questions
+        
+        // Store the analysis results for the progress display
+        setAnalysisResults({
+          completed_categories: update.completed_categories || [],
+          total_categories: completedCount,
+          final_analysis: update.final_analysis,
+          deposition_questions: update.deposition_questions
+        })
+        
+        content = `🎉 **Legal Analysis Complete!**\n\n**Categories Analyzed:** ${completedCount}\n\n**Analysis Results:**\n\n${analysisContent}`
+        
+        // Add deposition questions if available
+        if (depositionQuestions && typeof depositionQuestions === 'string') {
+          content += `\n\n**Deposition Questions:**\n\n${depositionQuestions}`
+        } else if (depositionQuestions && typeof depositionQuestions === 'object') {
+          content += `\n\n**Deposition Questions:**\n\n${JSON.stringify(depositionQuestions, null, 2)}`
+        }
+        
+        type = 'assistant'
         break
       case 'progress_update':
         if (update.message) {
@@ -425,8 +447,15 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
             Analysis Progress
           </h3>
           <CategoryProgress 
-            categories={caseData?.analyses?.[0]?.categories || []}
-            progress={caseData?.analyses?.[0]?.category_progress || []}
+            categories={analysisResults?.completed_categories || caseData?.analyses?.[0]?.categories || []}
+            progress={analysisResults ? 
+              analysisResults.completed_categories.map((cat: any, index: number) => ({
+                category: cat.name || `Category ${index + 1}`,
+                status: 'completed',
+                content: cat.content || ''
+              })) : 
+              (caseData?.analyses?.[0]?.category_progress || [])
+            }
           />
         </div>
         
