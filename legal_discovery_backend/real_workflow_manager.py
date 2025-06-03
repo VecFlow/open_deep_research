@@ -25,13 +25,16 @@ from open_deep_research.legal_state import LegalAnalysisState, AnalysisCategory
 from open_deep_research.configuration import Configuration
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.types import Command
 
 try:
     from .models import AnalysisDB, AnalysisCategory as AnalysisCategoryModel
     from .websocket_manager import WebSocketManager
+    from .database import get_db_session
 except ImportError:
     from models import AnalysisDB, AnalysisCategory as AnalysisCategoryModel
     from websocket_manager import WebSocketManager
+    from database import get_db_session
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,7 @@ class WorkflowExecution:
     interrupt_event: Optional[asyncio.Event] = None
     feedback_data: Optional[Dict[str, Any]] = None
     last_state: Optional[Dict[str, Any]] = None
+    waiting_for_feedback: bool = False
 
 class RealWorkflowManager:
     """Manages actual LangGraph workflow executions."""
@@ -94,6 +98,10 @@ class RealWorkflowManager:
     def get_active_workflow_count(self) -> int:
         """Get the number of active workflows."""
         return len(self.active_workflows)
+    
+    def _get_db_session(self):
+        """Get a database session."""
+        return get_db_session()
     
     async def start_workflow(
         self,
@@ -230,6 +238,7 @@ class RealWorkflowManager:
             # Execute workflow with interrupt handling
             final_state = None
             step_count = 0
+            workflow_interrupted = False
             
             logger.info(f"🚀 Starting LangGraph workflow execution for analysis {analysis_id}")
             logger.info(f"📝 Workflow input: {workflow_input}")
@@ -251,26 +260,25 @@ class RealWorkflowManager:
                 if "__interrupt__" in chunk:
                     await self._handle_workflow_interrupt(analysis_id, chunk, db_session)
                     
-                    # Wait for feedback
+                    # Store that we're waiting for feedback
                     execution.interrupt_event = asyncio.Event()
-                    logger.info(f"Workflow {analysis_id} paused for human feedback")
-                    await execution.interrupt_event.wait()
-                    logger.info(f"Workflow {analysis_id} resuming with feedback")
+                    execution.waiting_for_feedback = True
+                    workflow_interrupted = True
+                    logger.info(f"Workflow {analysis_id} paused for human feedback - stopping current stream")
                     
-                    # Resume with feedback
-                    if execution.feedback_data:
-                        # Add feedback to workflow state
-                        feedback_input = {
-                            **workflow_input,
-                            "feedback_on_analysis_plan": [execution.feedback_data.get("feedback", "")]
-                        }
-                        workflow_input = feedback_input
-                        execution.feedback_data = None
+                    # Stop the current stream - we'll resume with a new one when feedback arrives
+                    break
                 
                 final_state = chunk
             
-            # Workflow completed successfully
-            await self._complete_workflow(analysis_id, final_state, db_session)
+            # Only complete workflow if it wasn't interrupted (i.e., it finished naturally)
+            if not workflow_interrupted and final_state:
+                logger.info(f"🏁 Workflow {analysis_id} completed naturally - calling completion")
+                await self._complete_workflow(analysis_id, final_state, db_session)
+            elif workflow_interrupted:
+                logger.info(f"🔄 Workflow {analysis_id} interrupted and waiting for feedback - NOT completing")
+            else:
+                logger.warning(f"⚠️  Workflow {analysis_id} ended without final state or interrupt")
             
         except asyncio.CancelledError:
             logger.info(f"Real workflow {analysis_id} was cancelled")
@@ -299,9 +307,15 @@ class RealWorkflowManager:
                 message=f"Workflow failed: {str(e)}"
             )
         finally:
-            # Clean up
-            if analysis_id in self.active_workflows:
-                del self.active_workflows[analysis_id]
+            # Only clean up if workflow completed or failed, not if waiting for feedback
+            execution = self.active_workflows.get(analysis_id)
+            if execution and not execution.waiting_for_feedback:
+                # Clean up completed or failed workflows
+                if analysis_id in self.active_workflows:
+                    del self.active_workflows[analysis_id]
+                    logger.info(f"🧹 Cleaned up completed/failed workflow {analysis_id}")
+            elif execution and execution.waiting_for_feedback:
+                logger.info(f"🔄 Keeping workflow {analysis_id} active - waiting for feedback")
     
     async def _handle_workflow_chunk(
         self,
@@ -500,6 +514,9 @@ class RealWorkflowManager:
     ) -> None:
         """Complete the workflow and update final results."""
         try:
+            logger.info(f"🏁 Completing workflow {analysis_id}")
+            logger.info(f"📊 Final state keys: {list(final_state.keys()) if isinstance(final_state, dict) else 'Not a dict'}")
+            
             # Extract final results from workflow state (safely handle non-dict values)
             final_analysis = ""
             deposition_questions = None
@@ -507,11 +524,76 @@ class RealWorkflowManager:
             categories = []
             
             if isinstance(final_state, dict):
-                final_analysis = final_state.get("final_analysis", "")
-                deposition_questions = final_state.get("deposition_questions")
-                completed_categories = final_state.get("completed_categories", [])
-                categories = final_state.get("categories", [])
+                # Try to get the final analysis content
+                if 'compile_final_analysis' in final_state:
+                    final_content = final_state['compile_final_analysis']
+                    if isinstance(final_content, dict):
+                        final_analysis = final_content.get("final_analysis", "")
+                        deposition_questions = final_content.get("deposition_questions")
+                        completed_categories = final_content.get("completed_categories", [])
+                        categories = final_content.get("categories", [])
+                elif 'final_analysis' in final_state:
+                    final_analysis = final_state.get("final_analysis", "")
+                    deposition_questions = final_state.get("deposition_questions")
+                    completed_categories = final_state.get("completed_categories", [])
+                    categories = final_state.get("categories", [])
+                else:
+                    # Try to extract from any available data
+                    final_analysis = final_state.get("final_analysis", "")
+                    deposition_questions = final_state.get("deposition_questions")
+                    completed_categories = final_state.get("completed_categories", [])
+                    categories = final_state.get("categories", [])
+                    
+                    # If no completed categories found, check if we have categories from execution state
+                    if not completed_categories and not categories:
+                        execution = self.active_workflows.get(analysis_id)
+                        if execution and execution.last_state:
+                            if isinstance(execution.last_state, dict):
+                                categories = execution.last_state.get("categories", [])
+                                # Assume all categories are completed if we reached the end
+                                completed_categories = categories
             
+            logger.info(f"📋 Final analysis length: {len(final_analysis) if final_analysis else 0}")
+            logger.info(f"📂 Completed categories: {len(completed_categories)}")
+            logger.info(f"📁 Total categories: {len(categories)}")
+            
+            # Convert categories to serializable format
+            completed_categories_dict = []
+            for cat in completed_categories:
+                if hasattr(cat, 'model_dump'):
+                    completed_categories_dict.append(cat.model_dump())
+                elif hasattr(cat, 'dict'):
+                    completed_categories_dict.append(cat.dict())
+                elif isinstance(cat, dict):
+                    completed_categories_dict.append(cat)
+                else:
+                    # Try to extract fields from AnalysisCategory object
+                    cat_dict = {
+                        "name": getattr(cat, 'name', ''),
+                        "description": getattr(cat, 'description', ''),
+                        "requires_document_search": getattr(cat, 'requires_document_search', False),
+                        "content": getattr(cat, 'content', '')
+                    }
+                    completed_categories_dict.append(cat_dict)
+            
+            categories_dict = []
+            for cat in categories:
+                if hasattr(cat, 'model_dump'):
+                    categories_dict.append(cat.model_dump())
+                elif hasattr(cat, 'dict'):
+                    categories_dict.append(cat.dict())
+                elif isinstance(cat, dict):
+                    categories_dict.append(cat)
+                else:
+                    # Try to extract fields from AnalysisCategory object
+                    cat_dict = {
+                        "name": getattr(cat, 'name', ''),
+                        "description": getattr(cat, 'description', ''),
+                        "requires_document_search": getattr(cat, 'requires_document_search', False),
+                        "content": getattr(cat, 'content', '')
+                    }
+                    categories_dict.append(cat_dict)
+
             # Update analysis with final results
             analysis_db = db_session.query(AnalysisDB).filter(AnalysisDB.id == analysis_id).first()
             if analysis_db:
@@ -520,8 +602,10 @@ class RealWorkflowManager:
                 analysis_db.progress_percentage = 100
                 analysis_db.final_analysis = final_analysis
                 analysis_db.completed_at = datetime.utcnow()
-                analysis_db.categories_completed = len(completed_categories)
-                analysis_db.total_categories = len(categories)
+                analysis_db.categories_completed = len(completed_categories_dict)
+                analysis_db.total_categories = len(categories_dict)
+                analysis_db.categories = categories_dict
+                analysis_db.completed_categories = completed_categories_dict
                 
                 if deposition_questions:
                     if hasattr(deposition_questions, 'model_dump'):
@@ -531,31 +615,69 @@ class RealWorkflowManager:
                     else:
                         analysis_db.deposition_questions = deposition_questions
                 
-                if completed_categories:
-                    analysis_db.completed_categories = [
-                        cat.model_dump() if hasattr(cat, 'model_dump') 
-                        else cat.dict() if hasattr(cat, 'dict') 
-                        else cat
-                        for cat in completed_categories
-                    ]
-                
                 db_session.commit()
+                logger.info(f"💾 Updated database with final results for {analysis_id}")
             
-            # Send completion update
+            # Send completion update with results
             await self._send_progress_update(
                 analysis_id=analysis_id,
                 status="completed",
                 current_step="completed",
                 progress_percentage=100,
-                categories_completed=len(completed_categories),
-                total_categories=len(categories),
+                categories_completed=len(completed_categories_dict),
+                total_categories=len(categories_dict),
                 message="Legal analysis completed successfully!"
             )
             
-            logger.info(f"Real LangGraph workflow {analysis_id} completed successfully")
+            # Send detailed completion update with categories
+            await self._send_completion_update(
+                analysis_id=analysis_id,
+                completed_categories=completed_categories_dict,
+                final_analysis=final_analysis,
+                deposition_questions=deposition_questions
+            )
+            
+            logger.info(f"✅ Real LangGraph workflow {analysis_id} completed successfully")
             
         except Exception as e:
             logger.error(f"Error completing real workflow {analysis_id}: {e}")
+            import traceback
+            logger.error(f"📋 Completion error traceback:\n{traceback.format_exc()}")
+    
+    async def _send_completion_update(
+        self,
+        analysis_id: str,
+        completed_categories: List[Dict[str, Any]],
+        final_analysis: str,
+        deposition_questions: Any = None
+    ) -> None:
+        """Send detailed completion update with results."""
+        try:
+            if not self.websocket_manager:
+                return
+            
+            execution = self.active_workflows.get(analysis_id)
+            if not execution:
+                return
+            
+            completion_data = {
+                "type": "analysis_completed",
+                "analysis_id": analysis_id,
+                "completed_categories": completed_categories,
+                "final_analysis": final_analysis,
+                "deposition_questions": deposition_questions,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+            connection_count = await self.websocket_manager.broadcast_to_case(
+                case_id=execution.case_id,
+                message=completion_data
+            )
+            
+            logger.info(f"✅ Completion update sent to {connection_count} WebSocket clients")
+            
+        except Exception as e:
+            logger.error(f"Error sending completion update for {analysis_id}: {e}")
     
     async def _update_analysis_status(
         self,
@@ -822,21 +944,82 @@ class RealWorkflowManager:
             if not execution:
                 raise ValueError(f"No active workflow found for analysis {analysis_id}")
             
-            # Store feedback data
-            execution.feedback_data = {
-                "feedback": feedback,
-                "approve": approve,
-                "timestamp": datetime.utcnow().isoformat()
-            }
+            if not execution.waiting_for_feedback:
+                raise ValueError(f"Workflow {analysis_id} is not waiting for feedback")
             
-            # Signal the workflow to resume
-            if execution.interrupt_event:
-                execution.interrupt_event.set()
+            logger.info(f"📝 Providing feedback to workflow {analysis_id}: feedback='{feedback}', approve={approve}")
             
-            logger.info(f"Provided feedback to real workflow {analysis_id}")
+            # Use database context manager for proper session handling
+            try:
+                from .database import get_db
+            except ImportError:
+                from database import get_db
+            
+            with get_db() as db_session:
+                # Prepare the feedback value for LangGraph
+                if approve:
+                    feedback_value = True  # Boolean True for approval
+                else:
+                    feedback_value = feedback  # String for modification
+                    
+                logger.info(f"🎯 Resuming workflow with feedback_value: {feedback_value} (type: {type(feedback_value)})")
+                
+                # Resume the workflow using the correct LangGraph pattern
+                compiled_graph = builder.compile(checkpointer=execution.checkpointer)
+                
+                # Start a new stream with Command(resume=feedback_value) to continue the workflow
+                final_resume_state = None
+                resume_step_count = 0
+                resumed_workflow_completed = False
+                
+                async for chunk in compiled_graph.astream(
+                    Command(resume=feedback_value),
+                    config={
+                        **execution.config,
+                        "configurable": {
+                            **execution.config["configurable"],
+                            "thread_id": execution.thread_id
+                        }
+                    }
+                ):
+                    resume_step_count += 1
+                    logger.info(f"📊 LangGraph Resume Step {resume_step_count}: {list(chunk.keys()) if isinstance(chunk, dict) else chunk}")
+                    if chunk:
+                        logger.info(f"🔍 Resume chunk content: {chunk}")
+                    
+                    # Handle the resumed workflow updates
+                    await self._handle_workflow_chunk(analysis_id, chunk, db_session)
+                    
+                    # Check for another interrupt (shouldn't happen for approval)
+                    if isinstance(chunk, dict) and "__interrupt__" in chunk:
+                        logger.warning(f"⚠️  Unexpected interrupt in resumed workflow for {analysis_id}")
+                        # Could handle nested interrupts here if needed
+                    
+                    final_resume_state = chunk
+                
+                # Workflow completed after resume
+                if final_resume_state:
+                    logger.info(f"🏁 Resumed workflow {analysis_id} completed - calling completion")
+                    await self._complete_workflow(analysis_id, final_resume_state, db_session)
+                    resumed_workflow_completed = True
+                    
+                    # Remove from active workflows since it's completed
+                    if analysis_id in self.active_workflows:
+                        del self.active_workflows[analysis_id]
+                
+                # Clear the feedback waiting state
+                execution.waiting_for_feedback = False
+                execution.feedback_data = None
+                
+                if resumed_workflow_completed:
+                    logger.info(f"✅ Successfully completed workflow {analysis_id} after feedback")
+                else:
+                    logger.warning(f"⚠️  Workflow {analysis_id} resumed but didn't complete properly")
             
         except Exception as e:
             logger.error(f"Failed to provide feedback to real workflow {analysis_id}: {e}")
+            import traceback
+            logger.error(f"📋 Feedback error traceback:\n{traceback.format_exc()}")
             raise
     
     async def stop_case_workflows(self, case_id: str) -> None:

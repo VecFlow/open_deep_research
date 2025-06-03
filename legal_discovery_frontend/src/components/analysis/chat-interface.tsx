@@ -83,6 +83,7 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
     
     let content = ''
     let type: 'assistant' | 'system' = 'assistant'
+    let shouldCreateMessage = true
     
     switch (update.type) {
       case 'plan_generated':
@@ -102,27 +103,42 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
         type = 'system'
         break
       case 'analysis_completed':
-        content = 'Legal analysis has been completed successfully!'
+        content = `Legal analysis completed! All ${update.completed_categories?.length || 0} categories have been analyzed.`
         type = 'system'
+        break
+      case 'progress_update':
+        if (update.message) {
+          content = update.message
+          type = 'system'
+        } else {
+          shouldCreateMessage = false
+        }
         break
       case 'error':
         content = `Error: ${update.message}`
         type = 'system'
         break
       default:
-        content = `Workflow update: ${update.type}`
-        type = 'system'
+        // Only create messages for known types or those with explicit content
+        if (update.message) {
+          content = `Workflow update: ${update.type}`
+          type = 'system'
+        } else {
+          shouldCreateMessage = false
+        }
     }
     
-    const newMessage: ChatMessage = {
-      id: messageId,
-      type,
-      content,
-      timestamp: new Date(),
-      metadata: update
+    if (shouldCreateMessage && content) {
+      const newMessage: ChatMessage = {
+        id: messageId,
+        type,
+        content,
+        timestamp: new Date(),
+        metadata: update
+      }
+      
+      setMessages(prev => [...prev, newMessage])
     }
-    
-    setMessages(prev => [...prev, newMessage])
   }
   
   const handleSendMessage = async () => {
@@ -353,7 +369,6 @@ export function ChatInterface({ caseId }: ChatInterfaceProps) {
                 {/* Show feedback buttons for feedback requests */}
                 {message.metadata?.type === 'feedback_requested' && (
                   <div className="mt-3">
-                    {console.log('✅ Rendering FeedbackButtons for message:', message)}
                     <FeedbackButtons
                       onFeedback={handleFeedbackSubmit}
                       categories={message.metadata?.categories || caseData?.analyses?.[0]?.categories || []}
