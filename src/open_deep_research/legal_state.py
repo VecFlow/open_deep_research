@@ -1,4 +1,4 @@
-from typing import Annotated, List, TypedDict, Literal
+from typing import Annotated, List, TypedDict, Literal, Optional
 from pydantic import BaseModel, Field
 import operator
 
@@ -71,7 +71,7 @@ class LegalAnalysisInput(TypedDict):
 class LegalAnalysisOutput(TypedDict):
     final_analysis: str  # Final legal analysis with deposition questions
 
-class LegalAnalysisState(TypedDict):
+class LegalAnalysisState(TypedDict, total=False):
     background_on_case: str  # Background information on the legal case
     feedback_on_analysis_plan: Annotated[list[str], operator.add]  # List of feedback on the analysis plan
     categories: list[AnalysisCategory]  # List of analysis categories 
@@ -79,6 +79,9 @@ class LegalAnalysisState(TypedDict):
     analysis_categories_from_documents: str  # String of completed categories from document analysis
     deposition_questions: DepositionQuestions  # Generated deposition questions
     final_analysis: str  # Final legal analysis
+    analysis_approach: str  # Type of analysis approach chosen by orchestrator
+    orchestrator_reasoning: str  # AI orchestrator's reasoning for route selection
+    domain_analysis: str  # Domain-specific analysis details (for specialized cases)
 
 class CategoryState(TypedDict):
     background_on_case: str  # Background information on the legal case

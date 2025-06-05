@@ -48,7 +48,7 @@ from langsmith import traceable
 
 from open_deep_research.state import Section
 
-MAX_RESULTS_PER_QUERY = 100
+MAX_RESULTS_PER_QUERY = 10
     
 def get_config_value(value):
     """
@@ -1663,11 +1663,7 @@ async def search_documents_with_azure_ai(query_list: List[str], configurable) ->
             formatted_results += f"Relevance: {doc['score']}\n"
             formatted_results += f"Content:\n{doc['content']}\n"
             if doc.get('raw_content'):
-                # Limit raw content for legal docs
-                max_chars = 2000
-                raw = doc['raw_content'][:max_chars]
-                if len(doc['raw_content']) > max_chars:
-                    raw += "... [truncated]"
+                raw = doc['raw_content']
                 formatted_results += f"Full Text:\n{raw}\n"
             formatted_results += "-"*80 + "\n\n"
             

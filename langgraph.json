@@ -3,7 +3,8 @@
     "graphs": {
       "open_deep_research": "./src/open_deep_research/graph.py:graph",
       "open_deep_research_multi_agent": "./src/open_deep_research/multi_agent.py:graph",
-      "open_deep_research_legal_discovery": "./src/open_deep_research/legal_discovery.py:legal_graph"
+      "open_deep_research_legal_discovery": "./src/open_deep_research/legal_discovery.py:legal_graph",
+      "open_deep_research_legal_discovery_new": "./src/open_deep_research/legal_discovery_new.py:deposition_graph"
     },
     "python_version": "3.11",
     "env": "./.env",

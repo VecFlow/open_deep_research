@@ -17,7 +17,8 @@ from open_deep_research.legal_state import (
     CategoryOutputState,
     DocumentQueries,
     CategoryFeedback,
-    DepositionQuestions
+    DepositionQuestions,
+    AnalysisCategory
 )
 
 from open_deep_research.legal_prompts import (
@@ -37,6 +38,314 @@ from open_deep_research.utils import (
     get_config_value, 
     search_documents_with_azure_ai
 )
+
+## Dynamic Orchestration -- 
+
+async def dynamic_case_orchestrator(state: LegalAnalysisState, config: RunnableConfig) -> Command[Literal["generate_analysis_plan", "expedited_analysis", "complex_case_analysis", "specialized_domain_analysis"]]:
+    """Dynamically analyze the case and route to the most appropriate analysis approach.
+    
+    This node:
+    1. Analyzes the case background to understand complexity and type
+    2. Determines the optimal analysis strategy
+    3. Routes to the appropriate workflow path
+    
+    Args:
+        state: Current graph state containing the case background
+        config: Configuration for models and analysis
+        
+    Returns:
+        Command routing to the selected analysis approach
+    """
+    
+    # Get case background
+    background_on_case = state["background_on_case"]
+    
+    # Get configuration for the orchestrator
+    configurable = Configuration.from_runnable_config(config)
+    
+    # Set up the orchestrator model
+    planner_provider = get_config_value(configurable.planner_provider)
+    planner_model = get_config_value(configurable.planner_model)
+    planner_model_kwargs = get_config_value(configurable.planner_model_kwargs or {})
+    
+    if planner_model in ["claude-3-5-sonnet-latest", "claude-4-sonnet"]:
+        orchestrator_llm = init_chat_model(
+            model=planner_model, 
+            model_provider=planner_provider, 
+            max_tokens=20_000, 
+            thinking={"type": "enabled", "budget_tokens": 16_000}
+        )
+    else:
+        orchestrator_llm = init_chat_model(
+            model=planner_model, 
+            model_provider=planner_provider,
+            model_kwargs=planner_model_kwargs
+        )
+    
+    # Dynamic orchestration prompt
+    orchestrator_prompt = f"""You are a legal case orchestrator. Analyze the following case and determine the best analysis approach.
+
+Case Background: {background_on_case}
+
+Analyze this case and choose the most appropriate analysis strategy:
+
+1. "standard_analysis" - For typical cases that need comprehensive systematic analysis
+   - Use this for most general litigation cases
+   - Good for cases with standard complexity and scope
+
+2. "expedited_analysis" - For simple, urgent cases needing quick turnaround
+   - Use for straightforward cases with clear issues
+   - Good for cases with tight deadlines or simple fact patterns
+
+3. "complex_case_analysis" - For multi-party, high-stakes, or very complex cases
+   - Use for cases with multiple defendants, complex corporate structures
+   - Good for class actions, major commercial disputes, or cases with many moving parts
+
+4. "specialized_domain_analysis" - For cases requiring domain-specific expertise
+   - Use for highly technical cases (IP, securities, healthcare, etc.)
+   - Good for cases that need specialized knowledge or industry expertise
+
+Consider these factors:
+- Case complexity and number of parties
+- Legal domains involved (contract, tort, IP, securities, etc.)
+- Urgency and timeline requirements
+- Likely document volume and discovery scope
+- Specialized knowledge requirements
+
+Respond with ONLY the strategy name (e.g., "standard_analysis") and a brief 2-sentence explanation of why you chose this approach."""
+
+    # Get orchestrator decision
+    response = await orchestrator_llm.ainvoke([
+        SystemMessage(content="You are an expert legal strategist who routes cases to optimal analysis approaches."),
+        HumanMessage(content=orchestrator_prompt)
+    ])
+    
+    # Parse the response to extract the routing decision
+    response_text = response.content.strip().lower()
+    
+    # Determine routing based on orchestrator response
+    if "expedited_analysis" in response_text:
+        chosen_route = "expedited_analysis"
+        # Add metadata about the routing decision
+        update_data = {
+            "analysis_approach": "expedited",
+            "orchestrator_reasoning": response.content
+        }
+    elif "complex_case_analysis" in response_text:
+        chosen_route = "complex_case_analysis"
+        update_data = {
+            "analysis_approach": "complex",
+            "orchestrator_reasoning": response.content
+        }
+    elif "specialized_domain_analysis" in response_text:
+        chosen_route = "specialized_domain_analysis"
+        update_data = {
+            "analysis_approach": "specialized",
+            "orchestrator_reasoning": response.content
+        }
+    else:
+        # Default to standard analysis
+        chosen_route = "generate_analysis_plan"
+        update_data = {
+            "analysis_approach": "standard",
+            "orchestrator_reasoning": response.content
+        }
+    
+    # Log the routing decision for debugging
+    print(f"🤖 Dynamic Orchestrator Decision: {chosen_route}")
+    print(f"💭 Reasoning: {response.content}")
+    
+    return Command(
+        goto=chosen_route,
+        update=update_data
+    )
+
+async def expedited_analysis(state: LegalAnalysisState, config: RunnableConfig):
+    """Expedited analysis path for simple, urgent cases.
+    
+    This creates a streamlined analysis with fewer categories and faster execution.
+    """
+    
+    background_on_case = state["background_on_case"]
+    
+    # Get configuration
+    configurable = Configuration.from_runnable_config(config)
+    
+    # Set up simplified analysis structure for expedited cases
+    expedited_structure = "key facts, primary liability issues, damages overview, immediate action items"
+    
+    # Create expedited categories (fewer, more focused)
+    expedited_categories = [
+        AnalysisCategory(
+            name="Key Facts Summary",
+            description="Essential facts and timeline for the case",
+            requires_document_search=True,
+            content=""
+        ),
+        AnalysisCategory(
+            name="Primary Legal Issues",
+            description="Main liability and legal questions to address",
+            requires_document_search=True,
+            content=""
+        ),
+        AnalysisCategory(
+            name="Damages Assessment",
+            description="Quick evaluation of potential damages and remedies",
+            requires_document_search=False,
+            content=""
+        )
+    ]
+    
+    print(f"🚀 Expedited Analysis: Generated {len(expedited_categories)} streamlined categories")
+    
+    return {
+        "categories": expedited_categories,
+        "analysis_approach": "expedited"
+    }
+
+async def complex_case_analysis(state: LegalAnalysisState, config: RunnableConfig):
+    """Complex case analysis path for multi-party or high-stakes cases.
+    
+    This creates a comprehensive analysis with additional categories and deeper investigation.
+    """
+    
+    background_on_case = state["background_on_case"]
+    
+    # Enhanced analysis structure for complex cases
+    complex_structure = "detailed fact investigation, multi-party liability analysis, comprehensive damages assessment, discovery strategy, motion practice strategy, settlement considerations, trial preparation"
+    
+    # Create expanded categories for complex cases
+    complex_categories = [
+        AnalysisCategory(
+            name="Comprehensive Fact Investigation",
+            description="Detailed fact-finding and timeline reconstruction",
+            requires_document_search=True,
+            content=""
+        ),
+        AnalysisCategory(
+            name="Multi-Party Liability Analysis",
+            description="Analysis of liability across all parties and potential third parties",
+            requires_document_search=True,
+            content=""
+        ),
+        AnalysisCategory(
+            name="Damages and Economic Impact",
+            description="Comprehensive damages assessment including economic modeling",
+            requires_document_search=True,
+            content=""
+        ),
+        AnalysisCategory(
+            name="Discovery Strategy",
+            description="Strategic approach to document discovery and depositions",
+            requires_document_search=False,
+            content=""
+        ),
+        AnalysisCategory(
+            name="Motion Practice Strategy",
+            description="Potential motions and procedural considerations",
+            requires_document_search=False,
+            content=""
+        ),
+        AnalysisCategory(
+            name="Settlement Analysis",
+            description="Settlement leverage and negotiation considerations",
+            requires_document_search=False,
+            content=""
+        )
+    ]
+    
+    print(f"🏢 Complex Case Analysis: Generated {len(complex_categories)} comprehensive categories")
+    
+    return {
+        "categories": complex_categories,
+        "analysis_approach": "complex"
+    }
+
+async def specialized_domain_analysis(state: LegalAnalysisState, config: RunnableConfig):
+    """Specialized domain analysis for technical or niche legal areas.
+    
+    This creates domain-specific analysis categories based on the case type.
+    """
+    
+    background_on_case = state["background_on_case"]
+    
+    # Get configuration
+    configurable = Configuration.from_runnable_config(config)
+    planner_provider = get_config_value(configurable.planner_provider)
+    planner_model = get_config_value(configurable.planner_model)
+    planner_model_kwargs = get_config_value(configurable.planner_model_kwargs or {})
+    
+    # Set up domain analyzer
+    if planner_model in ["claude-3-5-sonnet-latest", "claude-4-sonnet"]:
+        domain_analyzer = init_chat_model(
+            model=planner_model, 
+            model_provider=planner_provider, 
+            max_tokens=20_000, 
+            thinking={"type": "enabled", "budget_tokens": 16_000}
+        )
+    else:
+        domain_analyzer = init_chat_model(
+            model=planner_model, 
+            model_provider=planner_provider,
+            model_kwargs=planner_model_kwargs
+        )
+    
+    # Generate domain-specific categories
+    domain_prompt = f"""Based on this case background, create specialized analysis categories appropriate for the specific legal domain(s) involved:
+
+Case: {background_on_case}
+
+Create 4-6 specialized categories that address the unique aspects of this legal domain. Consider:
+- Technical or industry-specific requirements
+- Specialized regulations or standards
+- Domain-specific defenses or claims
+- Expert witness needs
+- Specialized damages calculations
+
+Format each category with: name, description, and whether it requires_document_search (true/false)."""
+
+    domain_response = await domain_analyzer.ainvoke([
+        SystemMessage(content="You are a specialist legal analyst who creates domain-specific analysis frameworks."),
+        HumanMessage(content=domain_prompt)
+    ])
+    
+    # For now, create some example specialized categories
+    # In a full implementation, you'd parse the LLM response to create proper categories
+    specialized_categories = [
+        AnalysisCategory(
+            name="Domain-Specific Regulations",
+            description="Analysis of applicable specialized regulations and compliance requirements",
+            requires_document_search=True,
+            content=""
+        ),
+        AnalysisCategory(
+            name="Technical Standards and Practices",
+            description="Evaluation against industry standards and technical practices",
+            requires_document_search=True,
+            content=""
+        ),
+        AnalysisCategory(
+            name="Expert Witness Requirements",
+            description="Identification of needed expert witnesses and technical testimony",
+            requires_document_search=False,
+            content=""
+        ),
+        AnalysisCategory(
+            name="Specialized Damages Analysis",
+            description="Domain-specific damages calculations and economic impact",
+            requires_document_search=True,
+            content=""
+        )
+    ]
+    
+    print(f"🎯 Specialized Domain Analysis: Generated {len(specialized_categories)} domain-specific categories")
+    print(f"🧠 Domain reasoning: {domain_response.content[:200]}...")
+    
+    return {
+        "categories": specialized_categories,
+        "analysis_approach": "specialized",
+        "domain_analysis": domain_response.content
+    }
 
 ## Nodes -- 
 
@@ -571,7 +880,11 @@ category_analyzer.add_edge("search_documents", "analyze_category")
 
 # Add nodes
 builder = StateGraph(LegalAnalysisState, input=LegalAnalysisInput, output=LegalAnalysisOutput, config_schema=Configuration)
+builder.add_node("dynamic_case_orchestrator", dynamic_case_orchestrator)
 builder.add_node("generate_analysis_plan", generate_analysis_plan)
+builder.add_node("expedited_analysis", expedited_analysis)
+builder.add_node("complex_case_analysis", complex_case_analysis)
+builder.add_node("specialized_domain_analysis", specialized_domain_analysis)
 builder.add_node("human_feedback", human_feedback)
 builder.add_node("analyze_category_with_documents", category_analyzer.compile())
 builder.add_node("gather_completed_categories", gather_completed_categories)
@@ -579,9 +892,16 @@ builder.add_node("analyze_final_categories", analyze_final_categories)
 builder.add_node("generate_deposition_questions", generate_deposition_questions)
 builder.add_node("compile_final_analysis", compile_final_analysis)
 
-# Add edges
-builder.add_edge(START, "generate_analysis_plan")
+# Add edges - start with dynamic orchestrator
+builder.add_edge(START, "dynamic_case_orchestrator")
+
+# Connect the analysis paths back to human feedback
 builder.add_edge("generate_analysis_plan", "human_feedback")
+builder.add_edge("expedited_analysis", "human_feedback")
+builder.add_edge("complex_case_analysis", "human_feedback")
+builder.add_edge("specialized_domain_analysis", "human_feedback")
+
+# Continue with existing workflow
 builder.add_edge("analyze_category_with_documents", "gather_completed_categories")
 builder.add_conditional_edges("gather_completed_categories", initiate_final_category_analysis, ["analyze_final_categories"])
 builder.add_edge("analyze_final_categories", "generate_deposition_questions")
