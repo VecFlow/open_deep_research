@@ -98,19 +98,23 @@ async def stream_agent_execution(
                 message_type = 'progress'
                 
                 # Detect different types of messages based on content
-                if '🧠' in output or 'INSIGHT:' in output:
+                if 'AGENT_INTRO:' in output:
+                    message_type = 'agent_intro'
+                    # Remove the flag prefix for cleaner display
+                    output = output.replace('AGENT_INTRO: ', '')
+                elif 'INSIGHT:' in output:
                     message_type = 'insight'
-                elif '💡' in output or 'KEY DISCOVERY:' in output:
+                elif 'KEY DISCOVERY:' in output:
                     message_type = 'discovery'
-                elif '🔍' in output or 'Searched:' in output or 'Following lead:' in output:
+                elif 'Searched:' in output or 'Following lead:' in output or 'Conducting' in output and 'searches' in output:
                     message_type = 'search'
-                elif '📊' in output or 'RESEARCH PROGRESS:' in output:
+                elif 'RESEARCH PROGRESS:' in output or 'Research Round' in output:
                     message_type = 'research_progress'
-                elif '🤔' in output or 'Decision:' in output:
+                elif 'Decision:' in output:
                     message_type = 'decision'
-                elif '🎯' in output or 'FINAL DEPOSITION STRATEGY' in output:
+                elif 'FINAL DEPOSITION STRATEGY' in output or 'Compiling deposition questions' in output:
                     message_type = 'final_strategy'
-                elif '❌' in output or 'Error' in output:
+                elif 'Error' in output:
                     message_type = 'error'
                 
                 # Send the output

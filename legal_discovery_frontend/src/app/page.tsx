@@ -2,15 +2,11 @@ import { LegalDiscoveryInterface } from "@/components/legal-discovery/legal-disc
 
 export default function HomePage() {
   return (
-    <main className="min-h-screen bg-background">
-      <div className="container mx-auto px-4 py-8">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold tracking-tight mb-2">
-            Legal Discovery Agent
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            AI-powered legal discovery and deposition preparation tool
-          </p>
+    <main className="min-h-screen bg-white">
+      <div className="max-w-4xl mx-auto px-6 py-8">
+        {/* Simple header similar to Manus */}
+        <div className="flex items-center gap-3 mb-8">
+          <h1 className="text-xl font-medium text-gray-900">Oliver Deposition Workflow</h1>
         </div>
         
         <LegalDiscoveryInterface />

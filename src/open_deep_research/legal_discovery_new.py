@@ -120,20 +120,20 @@ async def run_intelligent_deposition_agent(case_background: str, config: Runnabl
             if "research_rounds" in node_output:
                 rounds = node_output["research_rounds"]
                 max_rounds = node_output.get("max_rounds", 10)
-                print(f"📊 RESEARCH PROGRESS: Round {rounds}/{max_rounds}")
+                print(f"RESEARCH PROGRESS: Round {rounds}/{max_rounds}")
                 print()
             
             # Show AI's key insights only (simplified)
             if "thinking_log" in node_output:
                 for thinking in node_output["thinking_log"]:
-                    print(f"🧠 INSIGHT: {thinking.insight}")
-                    print(f"📊 Confidence: {thinking.confidence:.2f} | Value: {thinking.strategic_value}")
+                    print(f"INSIGHT: {thinking.insight}")
+                    print(f"Confidence: {thinking.confidence:.2f} | Value: {thinking.strategic_value}")
                     print()
             
             # Show key insights discovered  
             if "key_insights" in node_output:
                 for insight in node_output["key_insights"]:
-                    print(f"💡 KEY DISCOVERY: {insight}")
+                    print(f"KEY DISCOVERY: {insight}")
                     print()
             
             # Show final results
@@ -142,9 +142,9 @@ async def run_intelligent_deposition_agent(case_background: str, config: Runnabl
                 if final_result and len(final_result) > 0:
                     total_questions = len(final_result[0].get("questions", []))
                     confidence = final_result[0].get("confidence_level", 0)
-                    print("🎯 FINAL DEPOSITION STRATEGY READY!")
-                    print(f"   📋 Generated {total_questions} strategic questions")
-                    print(f"   📊 Average confidence: {confidence:.2f}")
+                    print("FINAL DEPOSITION STRATEGY READY!")
+                    print(f"   Generated {total_questions} strategic questions")
+                    print(f"   Average confidence: {confidence:.2f}")
                 print()
     
     return final_result
@@ -377,7 +377,7 @@ async def initial_investigation(state: DepositionAgentState, config: RunnableCon
     )
     
     # Manus-like strategic overview
-    print("🤔 Let me analyze this case and explain my approach...")
+    print("Let me analyze this case and explain my approach...")
     print()
     
     overview_prompt = f"""You are an expert litigation attorney about to begin deposition preparation research. 
@@ -400,15 +400,15 @@ Be conversational and strategic, like you're explaining your game plan to a coll
         ])
         
         strategic_overview = overview_response.content
-        print(f"💭 {strategic_overview}")
+        print(f"AGENT_INTRO: {strategic_overview}")
         print()
-        print("🎯 Now let me get to work finding the evidence to make this happen...")
+        print("Now let me get to work finding the evidence to make this happen...")
         print()
         
     except Exception as e:
-        print(f"💭 I'm going to systematically investigate this case to find contradictions, timeline issues, and credibility problems that will give us devastating deposition questions.")
+        print("AGENT_INTRO: I'm going to systematically investigate this case to find contradictions, timeline issues, and credibility problems that will give us devastating deposition questions.")
         print()
-        print("🎯 Let me start my investigation...")
+        print("Let me start my investigation...")
         print()
     
     planning_prompt = f"""You are an expert litigation attorney planning a deposition preparation investigation.
@@ -428,15 +428,15 @@ Focus on finding contradictions, credibility issues, timeline problems, document
         HumanMessage(content=planning_prompt)
     ])
     
-    print(f"🎯 Starting investigation: {plan.investigation_focus}")
-    print(f"🔍 Conducting {len(plan.search_queries)} targeted searches...")
+    print(f"Starting investigation: {plan.investigation_focus}")
+    print(f"Conducting {len(plan.search_queries)} targeted searches...")
     
     # Execute initial searches
     initial_evidence = []
     for query in plan.search_queries:
         results = await search_documents_with_azure_ai([query], configurable)
         initial_evidence.append(results)
-        print(f"🔍 Searched: {query}")
+        print(f"Searched: {query}")
     
     return {
         "current_investigation": plan.investigation_focus,
@@ -445,7 +445,7 @@ Focus on finding contradictions, credibility issues, timeline problems, document
         "research_assessment": f"Started investigation into {plan.investigation_focus}. Found {len(initial_evidence)} evidence sets to analyze.",
         "question_readiness": False,
         "research_rounds": 0,  # Initialize rounds counter
-        "max_rounds": 10  # Set max rounds to 10
+        "max_rounds": 2  # Set max rounds to 10
     }
 
 async def adaptive_researcher(state: DepositionAgentState, config: RunnableConfig):
@@ -460,11 +460,11 @@ async def adaptive_researcher(state: DepositionAgentState, config: RunnableConfi
     # Increment research rounds
     new_research_rounds = research_rounds + 1
     
-    print(f"🧠 Research Round {new_research_rounds}/{max_rounds} - Analyzing evidence about: {current_focus}")
+    print(f"Research Round {new_research_rounds}/{max_rounds} - Analyzing evidence about: {current_focus}")
     
     # Check if we've hit max rounds
     if new_research_rounds >= max_rounds:
-        print(f"⏰ Reached maximum research rounds ({max_rounds}). Moving to question generation.")
+        print(f"Reached maximum research rounds ({max_rounds}). Moving to question generation.")
         return {
             "research_rounds": new_research_rounds,
             "next_action": "generate_questions",
@@ -478,12 +478,12 @@ async def adaptive_researcher(state: DepositionAgentState, config: RunnableConfi
         
         # Display AI's thinking (simplified)
         thinking = analysis.thinking
-        print(f"💡 {thinking.insight}")
-        print(f"📊 Confidence: {thinking.confidence:.1f} | Strategic Value: {thinking.strategic_value}")
+        print(f"{thinking.insight}")
+        print(f"Confidence: {thinking.confidence:.1f} | Strategic Value: {thinking.strategic_value}")
         
         # AI decides what to do next (with conservative bias)
         decision = await decide_next_action_intelligently(state, config)
-        print(f"🤔 Decision: {decision.next_action}")
+        print(f"Decision: {decision.next_action}")
         
         # Prepare updates based on AI decision
         updates = {
@@ -499,18 +499,18 @@ async def adaptive_researcher(state: DepositionAgentState, config: RunnableConfi
         
         if decision.next_action == "generate_questions" and high_confidence_insights >= 2 and new_research_rounds >= 3:
             updates["question_readiness"] = True
-            print(f"✅ AI determined ready for questions after {new_research_rounds} rounds with {high_confidence_insights} high-confidence insights")
+            print(f"AI determined ready for questions after {new_research_rounds} rounds with {high_confidence_insights} high-confidence insights")
         else:
             updates["question_readiness"] = False
             if decision.next_action == "generate_questions":
-                print(f"⚠️ AI wanted questions but forcing more research: rounds={new_research_rounds}, high_conf_insights={high_confidence_insights}")
+                print(f"AI wanted questions but forcing more research: rounds={new_research_rounds}, high_conf_insights={high_confidence_insights}")
                 updates["next_action"] = "investigate_deeper"  # Override to force more research
         
         # If continuing research, gather more evidence
         if updates["next_action"] == "investigate_deeper":
             configurable = Configuration.from_runnable_config(config)
             new_evidence = []
-            print(f"🔍 Conducting {len(analysis.high_value_leads[:3])} additional searches...")
+            print(f"Conducting {len(analysis.high_value_leads[:3])} additional searches...")
             for lead in analysis.high_value_leads[:3]:  # Limit to 3 searches
                 results = await search_documents_with_azure_ai([lead], configurable)
                 new_evidence.append(results)
@@ -540,7 +540,7 @@ async def adaptive_researcher(state: DepositionAgentState, config: RunnableConfi
 async def question_compiler(state: DepositionAgentState, config: RunnableConfig):
     """Generate final questions based on insights discovered"""
     
-    print("🎯 Compiling deposition questions based on discoveries...")
+    print("Compiling deposition questions based on discoveries...")
     
     questions = await generate_strategic_questions(state, config)
     
@@ -548,9 +548,9 @@ async def question_compiler(state: DepositionAgentState, config: RunnableConfig)
     if questions and questions[0].get("questions"):
         question_count = len(questions[0]["questions"])
         confidence = questions[0].get("confidence_level", 0)
-        print(f"✅ Generated {question_count} strategic questions")
-        print(f"📊 Average confidence: {confidence:.2f}")
-        print(f"🎯 Based on {len(state.get('key_insights', []))} key insights")
+        print(f"Generated {question_count} strategic questions")
+        print(f"Average confidence: {confidence:.2f}")
+        print(f"Based on {len(state.get('key_insights', []))} key insights")
     
     return {
         "final_questions": questions,

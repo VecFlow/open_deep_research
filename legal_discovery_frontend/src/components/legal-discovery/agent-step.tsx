@@ -37,25 +37,26 @@ const substepIcons: Record<string, React.ReactNode> = {
 export function AgentStep({ title, status, substeps }: AgentStepProps) {
   return (
     <Accordion type="single" collapsible className="w-full" defaultValue="step-item">
-      <AccordionItem value="step-item" className="border rounded-lg px-4 bg-card">
-        <AccordionTrigger>
+      <AccordionItem value="step-item" className="border rounded-lg bg-card shadow-sm">
+        <AccordionTrigger className="px-6 py-4 hover:no-underline">
           <div className="flex items-center gap-3">
             {statusIcons[status]}
             <span className={cn(
-              "font-semibold",
+              "font-medium text-lg",
               status === 'error' && 'text-red-500',
-              status === 'completed' && 'text-green-500'
+              status === 'completed' && 'text-green-600',
+              status === 'running' && 'text-blue-600'
             )}>{title}</span>
           </div>
         </AccordionTrigger>
-        <AccordionContent>
-          <div className="pl-8 space-y-2 border-l border-dashed ml-2.5">
+        <AccordionContent className="px-6 pb-4">
+          <div className="space-y-3 border-l-2 border-gray-200 ml-2.5 pl-6">
             {substeps.map((substep, index) => (
-              <div key={substep.id} className="flex items-start gap-3 text-sm">
-                <div className="mt-1">
+              <div key={substep.id} className="flex items-start gap-3">
+                <div className="mt-1 flex-shrink-0">
                   {substepIcons[substep.type] || substepIcons.default}
                 </div>
-                <p className="text-muted-foreground">{substep.text}</p>
+                <p className="text-sm text-muted-foreground leading-relaxed flex-1">{substep.text}</p>
               </div>
             ))}
           </div>
