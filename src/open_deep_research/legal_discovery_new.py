@@ -401,9 +401,6 @@ Be conversational and strategic, like you're explaining your game plan to a coll
         
         strategic_overview = overview_response.content
         print(f"AGENT_INTRO: {strategic_overview}")
-        print()
-        print("Now let me get to work finding the evidence to make this happen...")
-        print()
         
     except Exception as e:
         print("AGENT_INTRO: I'm going to systematically investigate this case to find contradictions, timeline issues, and credibility problems that will give us devastating deposition questions.")
@@ -428,7 +425,7 @@ Focus on finding contradictions, credibility issues, timeline problems, document
         HumanMessage(content=planning_prompt)
     ])
     
-    print(f"Starting investigation: {plan.investigation_focus}")
+    print(f"{plan.investigation_focus}")
     print(f"Conducting {len(plan.search_queries)} targeted searches...")
     
     # Execute initial searches

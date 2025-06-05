@@ -50,19 +50,22 @@ export function LegalDiscoveryInterface() {
       let currentStep = newSteps[newSteps.length - 1]
 
       // Determine if a new step should be created
-      const isNewResearchRound = message.type === 'research_progress' && message.message.includes('Round')
+      const isResearchPhase = message.type === 'research_progress' && message.message.includes('Round')
       const isFinalPhase = message.type === 'final_strategy' && message.message.includes('Compiling')
-      const isStartingInvestigation = message.type === 'progress' && message.message.includes('Starting investigation')
       
       let createdNewStep = false
       
-      if (!currentStep || isNewResearchRound || isFinalPhase) {
+      // Create new step only for major phase transitions
+      if (!currentStep || 
+          (isFinalPhase && currentStep.title !== "Generating Deposition Outline") ||
+          (isResearchPhase && currentStep.title !== "Research Phase")) {
+        
         if (currentStep) {
           currentStep.status = 'completed'
         }
         
         let title = "Investigation Phase"
-        if (isNewResearchRound) title = `Research Round ${message.message.split(' ')[2]}`
+        if (isResearchPhase) title = "Research Phase"
         if (isFinalPhase) title = "Generating Deposition Outline"
 
         currentStep = { 
@@ -76,12 +79,19 @@ export function LegalDiscoveryInterface() {
       }
 
       if (!createdNewStep) {
-        const newSubStep: SubStep = {
-          id: crypto.randomUUID(),
-          type: message.type,
-          text: message.message
+        // Check if this substep already exists to prevent duplicates
+        const isDuplicate = currentStep.substeps.some(existing => 
+          existing.type === message.type && existing.text === message.message
+        )
+        
+        if (!isDuplicate) {
+          const newSubStep: SubStep = {
+            id: crypto.randomUUID(),
+            type: message.type,
+            text: message.message
+          }
+          currentStep.substeps.push(newSubStep)
         }
-        currentStep.substeps.push(newSubStep)
       }
 
       // Handle completion or error
