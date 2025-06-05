@@ -20,13 +20,19 @@ export function LegalDiscoveryInterface() {
   const [steps, setSteps] = useState<AgentStepProps[]>([])
 
   const processStream = (message: StreamMessage) => {
+    console.log('Processing message:', message.type, message.message.substring(0, 50) + '...');
+    
     setSteps(prevSteps => {
+      console.log('Current steps count:', prevSteps.length);
       const newSteps = [...prevSteps]
       let currentStep = newSteps[newSteps.length - 1]
 
       // Determine if a new step should be created
       const isNewResearchRound = message.type === 'research_progress' && message.message.includes('Round')
       const isFinalPhase = message.type === 'final_strategy' && message.message.includes('Compiling')
+      
+      // Track if we created a new step
+      let createdNewStep = false
       
       if (!currentStep || isNewResearchRound || isFinalPhase) {
         if (currentStep) {
@@ -37,17 +43,26 @@ export function LegalDiscoveryInterface() {
         if (isNewResearchRound) title = `Research Round ${message.message.split(' ')[2]}`
         if (isFinalPhase) title = "Generating Deposition Outline"
 
+        console.log('Creating new step:', title);
         currentStep = { title, status: 'running', substeps: [] }
         newSteps.push(currentStep)
+        createdNewStep = true
       }
 
-      // Add substep to the current step
-      const newSubStep: SubStep = {
-        id: crypto.randomUUID(),
-        type: message.type,
-        text: message.message
+      // Only add substep if we didn't just create a new step with this message
+      // This prevents duplication of trigger messages
+      if (!createdNewStep) {
+        console.log('Adding substep to step:', currentStep.title);
+        const newSubStep: SubStep = {
+          id: crypto.randomUUID(),
+          type: message.type,
+          text: message.message
+        }
+        currentStep.substeps.push(newSubStep)
+        console.log('Step now has', currentStep.substeps.length, 'substeps');
+      } else {
+        console.log('Skipping substep addition - new step was created');
       }
-      currentStep.substeps.push(newSubStep)
 
       // Handle completion or error
       if (message.type === 'complete') {
