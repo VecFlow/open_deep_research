@@ -61,9 +61,6 @@ async def stream_agent_execution(
     stream_capture = StreamCapture()
     
     try:
-        # Send initial message
-        yield f"data: {json.dumps({'type': 'start', 'message': 'Starting legal discovery agent...', 'case': case_background[:100] + '...' if len(case_background) > 100 else case_background})}\n\n"
-        
         # Start capturing output
         stream_capture.start_capture()
         

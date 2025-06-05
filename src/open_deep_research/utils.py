@@ -223,7 +223,6 @@ async def azureaisearch_search_async(search_queries: list[str], max_results: int
     Returns:
         List[dict]: list of search responses from Weaviate, one per query.
     """
-    print(f"max_results: {max_results}")
     
     # Check if Weaviate v4 is available
     if not WEAVIATE_V4_AVAILABLE:

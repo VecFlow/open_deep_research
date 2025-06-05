@@ -94,19 +94,12 @@ def route_by_ai_decision(state: DepositionAgentState) -> str:
     research_rounds = state.get("research_rounds", 0)
     max_rounds = state.get("max_rounds", 10)
     
-    # Log the routing decision
-    print(f"🤖 Routing Decision - Round {research_rounds}/{max_rounds}")
-    print(f"   Next Action: {next_action} | Question Ready: {question_ready}")
-    
     # AI decides the routing - prioritize question readiness
     if question_ready:
-        print(f"   → Proceeding to question generation")
         return "generate_questions"
     elif next_action == "generate_questions":
-        print(f"   → AI chose questions but readiness check failed - continuing research")
         return "continue_research"
     else:
-        print(f"   → Continuing research (action: {next_action})")
         return "continue_research"  # Either investigate_deeper or switch_focus
 
 
@@ -116,11 +109,6 @@ async def run_intelligent_deposition_agent(case_background: str, config: Runnabl
     """Run the intelligent agent with real-time thinking display"""
     
     input_data = {"case_background": case_background}
-    
-    print("🧠 Intelligent Deposition Agent (Max 10 Research Rounds)")
-    print("=" * 60)
-    print(f"Case: {case_background[:100]}...")
-    print()
     
     final_result = None
     
@@ -135,14 +123,11 @@ async def run_intelligent_deposition_agent(case_background: str, config: Runnabl
                 print(f"📊 RESEARCH PROGRESS: Round {rounds}/{max_rounds}")
                 print()
             
-            # Show AI's thinking process
+            # Show AI's key insights only (simplified)
             if "thinking_log" in node_output:
                 for thinking in node_output["thinking_log"]:
                     print(f"🧠 INSIGHT: {thinking.insight}")
-                    print(f"   Evidence: {thinking.what_i_found[:150]}...")
-                    print(f"   Reasoning: {thinking.reasoning}")
-                    print(f"   Confidence: {thinking.confidence:.2f} | Value: {thinking.strategic_value}")
-                    print(f"   Next Focus: {thinking.next_focus}")
+                    print(f"📊 Confidence: {thinking.confidence:.2f} | Value: {thinking.strategic_value}")
                     print()
             
             # Show key insights discovered  
@@ -151,17 +136,7 @@ async def run_intelligent_deposition_agent(case_background: str, config: Runnabl
                     print(f"💡 KEY DISCOVERY: {insight}")
                     print()
             
-            # Show AI's assessment and decisions
-            if "research_assessment" in node_output:
-                print(f"📊 AI Assessment: {node_output['research_assessment']}")
-                print()
-                
-            if "next_action" in node_output:
-                action = node_output["next_action"]
-                question_ready = node_output.get("question_readiness", False)
-                print(f"🤔 AI Decision: {action} | Ready for Questions: {question_ready}")
-                print()
-            
+            # Show final results
             if "final_questions" in node_output:
                 final_result = node_output["final_questions"]
                 if final_result and len(final_result) > 0:
@@ -414,6 +389,8 @@ Provide a concise but thoughtful strategic overview (2-3 sentences) explaining:
 2. Your overall approach for finding devastating deposition evidence
 3. What kind of contradictions or smoking guns you'll be hunting for
 
+Only output 2 to 3 sentances. Start witgs omething like "I'll help you find the evidence to make this happen..."
+
 Be conversational and strategic, like you're explaining your game plan to a colleague. Focus on the specific details of this case, not generic deposition advice."""
 
     try:
@@ -452,7 +429,7 @@ Focus on finding contradictions, credibility issues, timeline problems, document
     ])
     
     print(f"🎯 Starting investigation: {plan.investigation_focus}")
-    print(f"📋 Planning {len(plan.search_queries)} targeted searches")
+    print(f"🔍 Conducting {len(plan.search_queries)} targeted searches...")
     
     # Execute initial searches
     initial_evidence = []
@@ -499,7 +476,7 @@ async def adaptive_researcher(state: DepositionAgentState, config: RunnableConfi
     if evidence_gathered:
         analysis = await analyze_evidence_intelligently(evidence_gathered, current_focus, case_background, config)
         
-        # Display AI's thinking
+        # Display AI's thinking (simplified)
         thinking = analysis.thinking
         print(f"💡 {thinking.insight}")
         print(f"📊 Confidence: {thinking.confidence:.1f} | Strategic Value: {thinking.strategic_value}")
@@ -507,7 +484,6 @@ async def adaptive_researcher(state: DepositionAgentState, config: RunnableConfi
         # AI decides what to do next (with conservative bias)
         decision = await decide_next_action_intelligently(state, config)
         print(f"🤔 Decision: {decision.next_action}")
-        print(f"💭 Reasoning: {decision.reasoning}")
         
         # Prepare updates based on AI decision
         updates = {
@@ -534,10 +510,10 @@ async def adaptive_researcher(state: DepositionAgentState, config: RunnableConfi
         if updates["next_action"] == "investigate_deeper":
             configurable = Configuration.from_runnable_config(config)
             new_evidence = []
+            print(f"🔍 Conducting {len(analysis.high_value_leads[:3])} additional searches...")
             for lead in analysis.high_value_leads[:3]:  # Limit to 3 searches
                 results = await search_documents_with_azure_ai([lead], configurable)
                 new_evidence.append(results)
-                print(f"🔍 Following lead: {lead}")
             
             updates["evidence_gathered"] = new_evidence
             

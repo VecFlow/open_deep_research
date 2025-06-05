@@ -1,8 +1,5 @@
 #!/bin/bash
 
-echo "🌐 Starting Legal Discovery Frontend"
-echo "===================================="
-
 # Navigate to frontend directory
 cd "$(dirname "$0")/legal_discovery_frontend"
 
