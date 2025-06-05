@@ -16,33 +16,60 @@ from open_deep_research.utils import (
 
 from pydantic import BaseModel, Field
 
-# State definition for the deposition agent
+# Simplified unified thinking structure
+class Thinking(BaseModel):
+    what_i_found: str  # Specific evidence pieces analyzed
+    insight: str  # What this evidence reveals (contradictions, gaps, smoking guns)
+    reasoning: str  # Why this matters for deposition strategy
+    confidence: float  # 0-1 based on evidence strength
+    strategic_value: str  # How devastating this could be
+    next_focus: str  # What to investigate next and why
+
+# Simplified state for intelligent agent
 class DepositionAgentState(TypedDict):
     case_background: str
-    current_research_phase: str  # For progress display
     
-    # Simplified tracking
-    all_search_results: List[str]  # All search results (set once, not accumulated)
-    key_topics: List[str]  # LLM-identified key topics  
-    exhausted_topics: Annotated[List[str], operator.add]
+    # AI's actual thinking and discoveries
+    thinking_log: Annotated[List[Thinking], operator.add]
+    current_investigation: str  # What AI is currently investigating and why
     
-    # Question generation
-    topic_questions: Annotated[List[dict], operator.add]  # Questions per topic
-    final_questions: List[dict]  # Organized final output
+    # Evidence and insights the AI has actually found
+    evidence_gathered: Annotated[List[str], operator.add]  # All evidence found
+    key_insights: Annotated[List[str], operator.add]  # Actual discoveries made
     
-    # Progress reporting (like Manus)
-    progress_log: Annotated[List[str], operator.add]
-    current_status: str
+    # AI decision making and rounds tracking
+    next_action: Literal["investigate_deeper", "switch_focus", "generate_questions"]
+    research_assessment: str  # AI's evaluation of research completeness
+    question_readiness: bool  # AI decides if ready to generate questions
+    research_rounds: int  # Track how many research rounds completed
+    max_rounds: int  # Maximum research rounds allowed
+    
+    # Final output
+    final_questions: List[dict]
 
-# Input/Output schemas
+# Input/Output schemas (simplified)
 class DepositionAgentInput(BaseModel):
     case_background: str = Field(description="Background information about the legal case")
 
 class DepositionAgentOutput(BaseModel):
-    final_questions: List[dict] = Field(description="Organized deposition questions with sources")
-    case_summary: str = Field(description="Summary of the case background")
+    final_questions: List[dict] = Field(description="Organized deposition questions with insights")
+    key_insights: List[str] = Field(description="Key discoveries made during investigation")
     total_questions: int = Field(description="Total number of questions generated")
-    question_topics: int = Field(description="Number of topics covered")
+
+# Simplified LLM response schemas
+class InvestigationPlan(BaseModel):
+    search_queries: List[str] = Field(description="Specific searches to conduct")
+    investigation_focus: str = Field(description="What to investigate and why")
+
+class EvidenceAnalysis(BaseModel):
+    thinking: Thinking = Field(description="AI's analysis of the evidence")
+    high_value_leads: List[str] = Field(description="Specific leads to follow up on")
+
+class NextActionDecision(BaseModel):
+    next_action: Literal["investigate_deeper", "switch_focus", "generate_questions"]
+    reasoning: str = Field(description="Why this action was chosen")
+    investigation_target: str = Field(description="What to investigate next if continuing research")
+    readiness_assessment: str = Field(description="Assessment of whether ready for questions")
 
 # Structured output schemas for LLM responses
 class InitialQueries(BaseModel):
@@ -58,184 +85,100 @@ class FollowUpQueries(BaseModel):
     queries: List[str] = Field(description="List of follow-up search queries to find more evidence")
     needs_more_search: bool = Field(description="Whether more searching is needed for this topic")
 
-# Simplified helper functions
+# Simplified Graph Construction
 
-async def identify_key_topics_with_llm(all_search_results: List[str], case_background: str, config) -> List[str]:
-    """Use LLM to analyze all search results and identify 3-5 key topics for deposition questioning"""
+def route_by_ai_decision(state: DepositionAgentState) -> str:
+    """Route based on AI's decision about what to do next"""
+    next_action = state.get("next_action", "investigate_deeper")
+    question_ready = state.get("question_readiness", False)
+    research_rounds = state.get("research_rounds", 0)
+    max_rounds = state.get("max_rounds", 10)
     
-    if not all_search_results:
-        return []
+    # Log the routing decision
+    print(f"🤖 Routing Decision - Round {research_rounds}/{max_rounds}")
+    print(f"   Next Action: {next_action} | Question Ready: {question_ready}")
     
-    # Get configuration
-    configurable = Configuration.from_runnable_config(config)
-    writer_provider = get_config_value(configurable.writer_provider)
-    writer_model_name = get_config_value(configurable.writer_model)
-    writer_model_kwargs = get_config_value(configurable.writer_model_kwargs or {})
-    writer_model = init_chat_model(
-        model=writer_model_name, 
-        model_provider=writer_provider, 
-        model_kwargs=writer_model_kwargs
-    )
-    
-    # Format search results for LLM analysis (limit to avoid token limits)
-    results_sample = all_search_results[:20]  # Take first 20 results
-    results_text = "\n\n".join([f"Result {i+1}: {result[:300]}..." for i, result in enumerate(results_sample)])
-    
-    topic_identification_prompt = f"""You are an expert litigation attorney analyzing search results to identify key topics for deposition questioning.
+    # AI decides the routing - prioritize question readiness
+    if question_ready:
+        print(f"   → Proceeding to question generation")
+        return "generate_questions"
+    elif next_action == "generate_questions":
+        print(f"   → AI chose questions but readiness check failed - continuing research")
+        return "continue_research"
+    else:
+        print(f"   → Continuing research (action: {next_action})")
+        return "continue_research"  # Either investigate_deeper or switch_focus
 
-Case Background: {case_background}
 
-Search Results from Document Review:
-{results_text}
 
-Based on these search results, identify 3-5 key topics that would be most valuable for deposition questioning. Focus on topics that:
-- Have multiple pieces of evidence or documentation
-- Show potential contradictions or inconsistencies  
-- Involve witness knowledge, actions, or credibility
-- Could lead to admissions or impeachment
-- Are central to the case's key disputes
-
-For each topic, provide a clear, concise name (2-4 words) that captures the deposition focus area."""
-
-    try:
-        structured_llm = writer_model.with_structured_output(KeyTopics)
-        
-        result = await structured_llm.ainvoke([
-            SystemMessage(content="You are an expert litigation attorney who identifies key deposition topics from evidence."),
-            HumanMessage(content=topic_identification_prompt)
-        ])
-        
-        return result.topics[:5]  # Limit to max 5 topics
-        
-    except Exception as e:
-        print(f"Error in topic identification: {e}")
-        # Fallback to simple topics
-        return ["Witness Knowledge", "Document Awareness", "Timeline Issues"]
-
-async def exhaust_search_on_topic_simple(topic: str, config) -> List[str]:
-    """Exhaustively search for all evidence related to a specific topic"""
+# Enhanced utility function for running with intelligent progress display
+async def run_intelligent_deposition_agent(case_background: str, config: RunnableConfig):
+    """Run the intelligent agent with real-time thinking display"""
     
-    # Generate expanded search queries for this specific topic
-    search_queries = [
-        f"All documents related to {topic}",
-        f"Timeline of events involving {topic}",
-        f"Communications about {topic}",
-        f"Evidence contradicting {topic}",
-        f"Witness statements about {topic}"
-    ]
+    input_data = {"case_background": case_background}
     
-    all_evidence = []
-    for query in search_queries:
-        results = await search_documents_with_azure_ai([query], config)
-        print(f"🔍 {query} found results")
-        print(f"results: {results}")
-        # Results is always a string, so append it as one item
-        all_evidence.append(results)
+    print("🧠 Intelligent Deposition Agent (Max 10 Research Rounds)")
+    print("=" * 60)
+    print(f"Case: {case_background[:100]}...")
+    print()
     
-    # Remove duplicates
-    all_evidence = ["\n".join(all_evidence)]
-    print(f"🔍 all_evidence: {all_evidence}")
-    print(f"🔍 all_evidence length: {len(all_evidence)}")
-    return all_evidence
-
-async def adaptive_search_on_topic(topic: str, case_background: str, config) -> List[str]:
-    """Iteratively search for evidence on a topic, generating new search queries based on findings"""
+    final_result = None
     
-    # Get configuration for LLM
-    configurable = Configuration.from_runnable_config(config)
-    writer_provider = get_config_value(configurable.writer_provider)
-    writer_model_name = get_config_value(configurable.writer_model)
-    writer_model_kwargs = get_config_value(configurable.writer_model_kwargs or {})
-    writer_model = init_chat_model(
-        model=writer_model_name, 
-        model_provider=writer_provider, 
-        model_kwargs=writer_model_kwargs
-    )
-    
-    all_evidence = []
-    search_round = 0
-    max_rounds = 3  # Limit iterations to prevent infinite loops
-    
-    # Initial search queries
-    current_queries = [
-        f"All documents related to {topic}",
-        f"Timeline of events involving {topic}",
-        f"Communications about {topic}",
-        f"Evidence contradicting {topic}",
-        f"Witness statements about {topic}"
-    ]
-    
-    while search_round < max_rounds:
-        search_round += 1
-        print(f"🔍 Search Round {search_round} for topic: {topic}")
-        
-        # Execute current search queries
-        round_evidence = []
-        for query in current_queries:
-            results = await search_documents_with_azure_ai([query], configurable)
-            # Results is always a string, so append it as one item
-            round_evidence.append(results)
-            print(f"   🔍 '{query}' found results")
-        
-        # Add to total evidence
-        all_evidence.extend(round_evidence)
-        
-        # If this is the final round, stop
-        if search_round >= max_rounds:
-            break
+    # Stream the execution and show AI thinking
+    async for chunk in deposition_graph.astream(input_data, config):
+        for node_name, node_output in chunk.items():
             
-        # Use LLM to analyze current evidence and determine if more searching is needed
-        evidence_sample = round_evidence  # Sample recent findings
-        
-        follow_up_prompt = f"""You are an expert litigation attorney analyzing evidence for deposition preparation.
-
-Case Background: {case_background}
-Current Topic: {topic}
-Current Search Round: {search_round}
-
-Recent Evidence Found:
-{evidence_sample}
-
-Based on the evidence found so far, determine:
-1. Do we need to search for more evidence on this topic?
-2. If yes, what specific search queries would help find additional relevant evidence?
-
-Focus on identifying:
-- Gaps in the evidence that need to be filled
-- Related people, documents, or events mentioned that need investigation
-- Contradictions that need more evidence to explore
-- Timeline gaps that need clarification
-
-Generate 3-5 specific follow-up search queries if more searching is needed."""
-
-        try:
-            structured_llm = writer_model.with_structured_output(FollowUpQueries)
+            # Show research progress
+            if "research_rounds" in node_output:
+                rounds = node_output["research_rounds"]
+                max_rounds = node_output.get("max_rounds", 10)
+                print(f"📊 RESEARCH PROGRESS: Round {rounds}/{max_rounds}")
+                print()
             
-            follow_up_result = await structured_llm.ainvoke([
-                SystemMessage(content="You are an expert litigation attorney who determines what additional evidence is needed for deposition preparation."),
-                HumanMessage(content=follow_up_prompt)
-            ])
+            # Show AI's thinking process
+            if "thinking_log" in node_output:
+                for thinking in node_output["thinking_log"]:
+                    print(f"🧠 INSIGHT: {thinking.insight}")
+                    print(f"   Evidence: {thinking.what_i_found[:150]}...")
+                    print(f"   Reasoning: {thinking.reasoning}")
+                    print(f"   Confidence: {thinking.confidence:.2f} | Value: {thinking.strategic_value}")
+                    print(f"   Next Focus: {thinking.next_focus}")
+                    print()
             
-            if not follow_up_result.needs_more_search:
-                print(f"   ✅ LLM determined sufficient evidence found for {topic}")
-                break
+            # Show key insights discovered  
+            if "key_insights" in node_output:
+                for insight in node_output["key_insights"]:
+                    print(f"💡 KEY DISCOVERY: {insight}")
+                    print()
+            
+            # Show AI's assessment and decisions
+            if "research_assessment" in node_output:
+                print(f"📊 AI Assessment: {node_output['research_assessment']}")
+                print()
                 
-            current_queries = follow_up_result.queries
-            print(f"   🎯 Generated {len(current_queries)} follow-up queries for next round")
+            if "next_action" in node_output:
+                action = node_output["next_action"]
+                question_ready = node_output.get("question_readiness", False)
+                print(f"🤔 AI Decision: {action} | Ready for Questions: {question_ready}")
+                print()
             
-        except Exception as e:
-            print(f"   ⚠️ Error in follow-up analysis: {e}")
-            break  # Stop if LLM fails
+            if "final_questions" in node_output:
+                final_result = node_output["final_questions"]
+                if final_result and len(final_result) > 0:
+                    total_questions = len(final_result[0].get("questions", []))
+                    confidence = final_result[0].get("confidence_level", 0)
+                    print("🎯 FINAL DEPOSITION STRATEGY READY!")
+                    print(f"   📋 Generated {total_questions} strategic questions")
+                    print(f"   📊 Average confidence: {confidence:.2f}")
+                print()
     
-    
-    print(f"🔍 Adaptive search completed for {topic}: {len(all_evidence)} unique pieces of evidence across {search_round} rounds")
-    
-    return all_evidence
+    return final_result
 
-async def generate_questions_with_llm(topic: str, evidence: List[str], case_background: str, config) -> List[str]:
-    """Generate deposition questions using LLM based on complete evidence for a topic"""
+# Core intelligent functions
+
+async def analyze_evidence_intelligently(evidence_batch: List[str], current_focus: str, case_background: str, config) -> EvidenceAnalysis:
+    """AI analyzes evidence to find real insights and decide what to investigate next"""
     
-    # Get configuration
     configurable = Configuration.from_runnable_config(config)
     writer_provider = get_config_value(configurable.writer_provider)
     writer_model_name = get_config_value(configurable.writer_model)
@@ -245,58 +188,210 @@ async def generate_questions_with_llm(topic: str, evidence: List[str], case_back
         model_provider=writer_provider, 
         model_kwargs=writer_model_kwargs
     )
-
-    evidence_context = evidence
     
-    question_prompt = f"""You are an expert litigation attorney generating strategic deposition questions.
+    # Combine evidence for analysis
+    evidence_text = "\n\n".join([f"Evidence {i+1}: {evidence}" for i, evidence in enumerate(evidence_batch)])
+    
+    analysis_prompt = f"""You are an expert litigation attorney analyzing evidence for deposition preparation.
 
 Case Background: {case_background}
-Topic: {topic}
+Current Investigation Focus: {current_focus}
 
 Evidence Found:
-{evidence_context}
+{evidence_text}
 
-Generate 5-8 strategic deposition questions for this topic that:
-1. Establish foundation and knowledge
-2. Explore contradictions or inconsistencies 
-3. Pin down specific facts and timeline
-4. Confront the witness with evidence
-5. Impeach if appropriate
+Analyze this evidence carefully and provide:
 
-Focus on questions that use the specific evidence found. Make them precise and tactical. Reference specific documents, dates, names, and facts from the evidence above."""
+1. What specific contradictions, timeline issues, or credibility problems did you find?
+2. What does this evidence reveal that could be used to impeach or corner a witness?
+3. How confident are you in this evidence (0.0 to 1.0)?
+4. How strategically valuable is this finding for depositions?
+5. What specific leads should be investigated next?
+
+Focus on SPECIFIC findings - actual quotes, dates, names, contradictions. Be concrete about what makes this evidence valuable or weak."""
 
     try:
-        structured_llm = writer_model.with_structured_output(TopicQuestions)
+        structured_llm = writer_model.with_structured_output(EvidenceAnalysis)
         
         result = await structured_llm.ainvoke([
+            SystemMessage(content="You are an expert litigation attorney who finds specific contradictions and credibility issues in evidence."),
+            HumanMessage(content=analysis_prompt)
+        ])
+        
+        return result
+        
+    except Exception as e:
+        print(f"Error in evidence analysis: {e}")
+        # Fallback with basic analysis
+        return EvidenceAnalysis(
+            thinking=Thinking(
+                what_i_found=f"Analyzed {len(evidence_batch)} pieces of evidence about {current_focus}",
+                insight="Basic evidence review completed",
+                reasoning="Need more sophisticated analysis",
+                confidence=0.3,
+                strategic_value="Unknown - needs deeper analysis",
+                next_focus="Continue investigating with different approach"
+            ),
+            high_value_leads=[f"Search for more evidence about {current_focus}"]
+        )
+
+async def decide_next_action_intelligently(state: DepositionAgentState, config) -> NextActionDecision:
+    """AI looks at all discoveries and decides what to do next"""
+    
+    configurable = Configuration.from_runnable_config(config)
+    writer_provider = get_config_value(configurable.writer_provider)
+    writer_model_name = get_config_value(configurable.writer_model)
+    writer_model_kwargs = get_config_value(configurable.writer_model_kwargs or {})
+    writer_model = init_chat_model(
+        model=writer_model_name, 
+        model_provider=writer_provider, 
+        model_kwargs=writer_model_kwargs
+    )
+    
+    # Summarize current state for LLM
+    thinking_summary = []
+    for thinking in state.get("thinking_log", []):
+        thinking_summary.append(f"Found: {thinking.what_i_found} | Insight: {thinking.insight} | Confidence: {thinking.confidence}")
+    
+    insights_summary = "\n".join(state.get("key_insights", []))
+    current_investigation = state.get("current_investigation", "Initial investigation")
+    research_rounds = state.get("research_rounds", 0)
+    max_rounds = state.get("max_rounds", 10)
+    
+    # Count high-confidence insights
+    high_confidence_insights = sum(1 for t in state.get("thinking_log", []) if t.confidence > 0.7)
+    total_insights = len(state.get("thinking_log", []))
+    
+    decision_prompt = f"""You are an expert litigation attorney making strategic decisions about deposition preparation research.
+
+Case Background: {state["case_background"]}
+Current Investigation: {current_investigation}
+Research Round: {research_rounds}/{max_rounds}
+
+Analysis History:
+{chr(10).join(thinking_summary) if thinking_summary else "No analysis completed yet"}
+
+Key Insights Discovered:
+{insights_summary if insights_summary else "No key insights identified yet"}
+
+Evidence Quality Assessment:
+- Total insights found: {total_insights}
+- High-confidence insights (>0.7): {high_confidence_insights}
+- Research rounds completed: {research_rounds}
+
+IMPORTANT: You should be VERY conservative about moving to question generation. Only choose "generate_questions" if you have:
+1. At least 3-4 high-confidence insights with strong evidence
+2. Multiple contradictions or smoking gun pieces of evidence
+3. Comprehensive evidence that would devastate the witness
+4. Strong confidence that you have enough ammunition for an effective deposition
+
+Otherwise, continue researching. Better to over-investigate than under-investigate.
+
+Based on your analysis so far, decide what to do next:
+
+1. investigate_deeper: Continue researching the current focus area because you need more evidence (PREFERRED - be thorough!)
+2. switch_focus: Move to a different area because current area is exhausted or unproductive  
+3. generate_questions: Start generating questions ONLY if you have overwhelming evidence
+
+Consider:
+- Do you have multiple devastating contradictions or smoking gun evidence?
+- Are there obvious gaps that need filling?
+- Would more research likely uncover additional damaging evidence?
+- Is the current evidence quality sufficient for devastating cross-examination?
+
+BE THOROUGH - better to over-research than generate weak questions."""
+
+    try:
+        structured_llm = writer_model.with_structured_output(NextActionDecision)
+        
+        result = await structured_llm.ainvoke([
+            SystemMessage(content="You are an expert litigation attorney who is VERY conservative about moving to question generation. You prefer thorough research over rushing to questions."),
+            HumanMessage(content=decision_prompt)
+        ])
+        
+        return result
+        
+    except Exception as e:
+        print(f"Error in decision making: {e}")
+        # Fallback decision - default to more research
+        return NextActionDecision(
+            next_action="investigate_deeper",
+            reasoning="Continuing research due to analysis error - better to over-investigate",
+            investigation_target="Continue current investigation",
+            readiness_assessment="Need more evidence before generating questions"
+        )
+
+async def generate_strategic_questions(state: DepositionAgentState, config) -> List[dict]:
+    """Generate questions based on actual insights discovered"""
+    
+    configurable = Configuration.from_runnable_config(config)
+    writer_provider = get_config_value(configurable.writer_provider)
+    writer_model_name = get_config_value(configurable.writer_model)
+    writer_model_kwargs = get_config_value(configurable.writer_model_kwargs or {})
+    writer_model = init_chat_model(
+        model=writer_model_name, 
+        model_provider=writer_provider, 
+        model_kwargs=writer_model_kwargs
+    )
+    
+    # Compile all insights for question generation
+    insights_for_questions = []
+    for thinking in state.get("thinking_log", []):
+        if thinking.confidence > 0.4:  # Only use confident insights
+            insights_for_questions.append({
+                "evidence": thinking.what_i_found,
+                "insight": thinking.insight,
+                "strategic_value": thinking.strategic_value
+            })
+    
+    if not insights_for_questions:
+        return [{"questions": ["What is your knowledge of this case?"], "basis": "General inquiry"}]
+    
+    question_prompt = f"""You are an expert litigation attorney generating strategic deposition questions based on specific evidence and insights.
+
+Case Background: {state["case_background"]}
+
+Evidence and Insights Discovered:
+{chr(10).join([f"Evidence: {insight['evidence']} | Insight: {insight['insight']} | Value: {insight['strategic_value']}" for insight in insights_for_questions])}
+
+Generate 8-12 strategic deposition questions that:
+1. Build on the specific evidence and insights found
+2. Create logical sequences that corner the witness
+3. Reference specific documents, dates, communications discovered
+4. Expose the contradictions and credibility issues identified
+
+Return the questions as a simple list of strings. Make each question tactical and based on the actual evidence found."""
+
+    try:
+        response = await writer_model.ainvoke([
             SystemMessage(content="You are an expert litigation attorney who generates strategic deposition questions based on specific evidence."),
             HumanMessage(content=question_prompt)
         ])
         
-        return result.questions
+        # Parse response into question list
+        question_text = response.content
+        questions = [q.strip() for q in question_text.split('\n') if q.strip() and not q.strip().startswith('#')]
+        
+        return [{
+            "questions": questions,
+            "basis": f"Based on {len(insights_for_questions)} key insights discovered",
+            "evidence_sources": len(state.get("evidence_gathered", [])),
+            "confidence_level": sum(t.confidence for t in state.get("thinking_log", [])) / max(len(state.get("thinking_log", [])), 1)
+        }]
         
     except Exception as e:
         print(f"Error generating questions: {e}")
-        # Fallback simple questions
-        return [
-            f"What is your knowledge of {topic}?",
-            f"Can you explain the circumstances surrounding {topic}?",
-            f"Are you aware of any documents related to {topic}?",
-            f"Did you have any communications about {topic}?",
-            f"Is your testimony regarding {topic} consistent with the evidence?"
-        ]
+        return [{"questions": ["What is your role in this matter?", "What documents have you reviewed?"], "basis": "Fallback questions"}] 
 
-# Main nodes
+# Simplified intelligent nodes
 
-async def initial_research(state: DepositionAgentState, config: RunnableConfig):
-    """Broad exploration of case background to identify key topics for deposition questioning"""
+async def initial_investigation(state: DepositionAgentState, config: RunnableConfig):
+    """Start investigation by identifying key areas to explore"""
     
     case_background = state["case_background"]
-    
-    # Get configuration
     configurable = Configuration.from_runnable_config(config)
     
-    # Set up LLM for generating initial queries
+    # AI plans initial investigation
     writer_provider = get_config_value(configurable.writer_provider)
     writer_model_name = get_config_value(configurable.writer_model)
     writer_model_kwargs = get_config_value(configurable.writer_model_kwargs or {})
@@ -306,143 +401,187 @@ async def initial_research(state: DepositionAgentState, config: RunnableConfig):
         model_kwargs=writer_model_kwargs
     )
     
-    # Progress update
-    progress_update = "Starting comprehensive case analysis to identify key areas for deposition questioning."
+    # Manus-like strategic overview
+    print("🤔 Let me analyze this case and explain my approach...")
+    print()
     
-    # Generate initial research queries using LLM
-    query_generation_prompt = f"""Based on the following case background, generate 5-7 strategic research queries that would help identify the most important areas for deposition questioning.
+    overview_prompt = f"""You are an expert litigation attorney about to begin deposition preparation research. 
 
 Case Background: {case_background}
 
-Focus on queries that would help discover:
-- Key factual disputes and inconsistencies
-- Important witnesses and their potential credibility issues
-- Critical documents and evidence
-- Timeline inconsistencies or contradictions
-- Areas where witnesses might be vulnerable to impeachment
-- Potential smoking gun evidence
+Provide a concise but thoughtful strategic overview (2-3 sentences) explaining:
+1. What you see as the key opportunities and vulnerabilities in this case
+2. Your overall approach for finding devastating deposition evidence
+3. What kind of contradictions or smoking guns you'll be hunting for
 
-Generate specific, targeted search queries that would uncover evidence useful for depositions."""
+Be conversational and strategic, like you're explaining your game plan to a colleague. Focus on the specific details of this case, not generic deposition advice."""
 
-    structured_llm = writer_model.with_structured_output(InitialQueries)
+    try:
+        overview_response = await writer_model.ainvoke([
+            SystemMessage(content="You are an expert litigation attorney who provides strategic overviews before beginning deposition research. Be concise, insightful, and case-specific."),
+            HumanMessage(content=overview_prompt)
+        ])
+        
+        strategic_overview = overview_response.content
+        print(f"💭 {strategic_overview}")
+        print()
+        print("🎯 Now let me get to work finding the evidence to make this happen...")
+        print()
+        
+    except Exception as e:
+        print(f"💭 I'm going to systematically investigate this case to find contradictions, timeline issues, and credibility problems that will give us devastating deposition questions.")
+        print()
+        print("🎯 Let me start my investigation...")
+        print()
     
-    initial_queries_result = await structured_llm.ainvoke([
-        SystemMessage(content="You are an expert litigation attorney who generates strategic research queries for deposition preparation."),
-        HumanMessage(content=query_generation_prompt)
+    planning_prompt = f"""You are an expert litigation attorney planning a deposition preparation investigation.
+
+Case Background: {case_background}
+
+Create an initial investigation plan:
+1. What are 4-5 specific search queries that would uncover the most valuable evidence for depositions?
+2. What should be the primary investigation focus (what vulnerability to explore first)?
+
+Focus on finding contradictions, credibility issues, timeline problems, document gaps, and smoking gun evidence."""
+
+    structured_llm = writer_model.with_structured_output(InvestigationPlan)
+    
+    plan = await structured_llm.ainvoke([
+        SystemMessage(content="You are an expert litigation attorney who plans strategic deposition research."),
+        HumanMessage(content=planning_prompt)
     ])
     
-    initial_queries = initial_queries_result.queries
+    print(f"🎯 Starting investigation: {plan.investigation_focus}")
+    print(f"📋 Planning {len(plan.search_queries)} targeted searches")
     
-    print(f"🎯 Generated {len(initial_queries)} initial research queries")
-    for i, query in enumerate(initial_queries, 1):
-        print(f"   {i}. {query}")
-    
-    # Search documents with each query and collect ALL results
-    all_search_results = []
-    for query in initial_queries:
+    # Execute initial searches
+    initial_evidence = []
+    for query in plan.search_queries:
         results = await search_documents_with_azure_ai([query], configurable)
-        # Results is always a string, so append it as one item
-        all_search_results.append(results)
-    
-    print(f"📊 Collected {len(all_search_results)} total search results")
-    
-    # Use LLM to identify key topics from all search results
-    key_topics = await identify_key_topics_with_llm(all_search_results, case_background, config)
-    
-    print(f"🎯 Identified {len(key_topics)} key topics for deposition questioning:")
-    for i, topic in enumerate(key_topics, 1):
-        print(f"   {i}. {topic}")
+        initial_evidence.append(results)
+        print(f"🔍 Searched: {query}")
     
     return {
-        "all_search_results": all_search_results,
-        "key_topics": key_topics,
-        "current_research_phase": "discovery_loop" if key_topics else "compilation",
-        "progress_log": [progress_update],
-        "current_status": f"Identified {len(key_topics)} key topics for deposition questioning."
+        "current_investigation": plan.investigation_focus,
+        "evidence_gathered": initial_evidence,
+        "next_action": "investigate_deeper",
+        "research_assessment": f"Started investigation into {plan.investigation_focus}. Found {len(initial_evidence)} evidence sets to analyze.",
+        "question_readiness": False,
+        "research_rounds": 0,  # Initialize rounds counter
+        "max_rounds": 10  # Set max rounds to 10
     }
 
-async def discovery_loop(state: DepositionAgentState, config: RunnableConfig):
-    """Process each key topic: exhaust search and generate deposition questions"""
+async def adaptive_researcher(state: DepositionAgentState, config: RunnableConfig):
+    """Analyze current evidence and adaptively decide what to do next"""
     
-    # Get next unprocessed topic (simple sequential processing)
-    key_topics = state["key_topics"]
-    exhausted_topics = state["exhausted_topics"]
+    current_focus = state["current_investigation"]
+    evidence_gathered = state.get("evidence_gathered", [])
+    case_background = state["case_background"]
+    research_rounds = state.get("research_rounds", 0)
+    max_rounds = state.get("max_rounds", 10)
     
-    # Find next topic to process
-    unprocessed_topics = [topic for topic in key_topics if topic not in exhausted_topics]
+    # Increment research rounds
+    new_research_rounds = research_rounds + 1
     
-    if not unprocessed_topics:
-        # No more topics to process - move to compilation
+    print(f"🧠 Research Round {new_research_rounds}/{max_rounds} - Analyzing evidence about: {current_focus}")
+    
+    # Check if we've hit max rounds
+    if new_research_rounds >= max_rounds:
+        print(f"⏰ Reached maximum research rounds ({max_rounds}). Moving to question generation.")
         return {
-            "current_research_phase": "compilation",
-            "progress_log": ["Completed deep research on all key topics. Moving to question compilation."],
-            "current_status": f"Research complete. Organizing {len(state['topic_questions'])} question sets into final deposition outline."
+            "research_rounds": new_research_rounds,
+            "next_action": "generate_questions",
+            "question_readiness": True,
+            "research_assessment": f"Completed maximum research rounds ({max_rounds}). Proceeding with available evidence."
         }
     
-    # Process the next topic (first in list)
-    current_topic = unprocessed_topics[0]
+    # AI analyzes current evidence for insights
+    if evidence_gathered:
+        analysis = await analyze_evidence_intelligently(evidence_gathered, current_focus, case_background, config)
+        
+        # Display AI's thinking
+        thinking = analysis.thinking
+        print(f"💡 {thinking.insight}")
+        print(f"📊 Confidence: {thinking.confidence:.1f} | Strategic Value: {thinking.strategic_value}")
+        
+        # AI decides what to do next (with conservative bias)
+        decision = await decide_next_action_intelligently(state, config)
+        print(f"🤔 Decision: {decision.next_action}")
+        print(f"💭 Reasoning: {decision.reasoning}")
+        
+        # Prepare updates based on AI decision
+        updates = {
+            "thinking_log": [thinking],
+            "next_action": decision.next_action,
+            "research_assessment": decision.readiness_assessment,
+            "research_rounds": new_research_rounds
+        }
+        
+        # Be VERY conservative about question readiness
+        # Only set to True if AI explicitly chooses generate_questions AND we have strong evidence
+        high_confidence_insights = sum(1 for t in state.get("thinking_log", []) if t.confidence > 0.7)
+        
+        if decision.next_action == "generate_questions" and high_confidence_insights >= 2 and new_research_rounds >= 3:
+            updates["question_readiness"] = True
+            print(f"✅ AI determined ready for questions after {new_research_rounds} rounds with {high_confidence_insights} high-confidence insights")
+        else:
+            updates["question_readiness"] = False
+            if decision.next_action == "generate_questions":
+                print(f"⚠️ AI wanted questions but forcing more research: rounds={new_research_rounds}, high_conf_insights={high_confidence_insights}")
+                updates["next_action"] = "investigate_deeper"  # Override to force more research
+        
+        # If continuing research, gather more evidence
+        if updates["next_action"] == "investigate_deeper":
+            configurable = Configuration.from_runnable_config(config)
+            new_evidence = []
+            for lead in analysis.high_value_leads[:3]:  # Limit to 3 searches
+                results = await search_documents_with_azure_ai([lead], configurable)
+                new_evidence.append(results)
+                print(f"🔍 Following lead: {lead}")
+            
+            updates["evidence_gathered"] = new_evidence
+            
+        elif updates["next_action"] == "switch_focus":
+            updates["current_investigation"] = decision.investigation_target
+            updates["evidence_gathered"] = []  # Reset evidence for new focus
+            
+        # Add key insights if they're strong enough
+        if thinking.confidence > 0.6:
+            insight_summary = f"{thinking.insight} (Evidence: {thinking.what_i_found[:100]}...)"
+            updates["key_insights"] = [insight_summary]
+            
+        return updates
     
-    # Progress update
-    progress_update = f"Deep diving into '{current_topic}' - searching for all related evidence and generating questions."
+    else:
+        # No evidence yet, need to start research
+        return {
+            "next_action": "investigate_deeper",
+            "research_assessment": "No evidence gathered yet, need to start research",
+            "question_readiness": False,
+            "research_rounds": new_research_rounds
+        }
+
+async def question_compiler(state: DepositionAgentState, config: RunnableConfig):
+    """Generate final questions based on insights discovered"""
     
-    # Get configuration
-    configurable = Configuration.from_runnable_config(config)
+    print("🎯 Compiling deposition questions based on discoveries...")
     
-    # EXHAUST SEARCH on this specific topic
-    complete_evidence = await adaptive_search_on_topic(current_topic, state["case_background"], config)
+    questions = await generate_strategic_questions(state, config)
     
-    print(f"🔍 Found {len(complete_evidence)} pieces of evidence for topic: {current_topic}")
-    
-    # Generate questions based on COMPLETE evidence using LLM
-    topic_questions = await generate_questions_with_llm(
-        current_topic, 
-        complete_evidence, 
-        state["case_background"],
-        config
-    )
+    # Display results
+    if questions and questions[0].get("questions"):
+        question_count = len(questions[0]["questions"])
+        confidence = questions[0].get("confidence_level", 0)
+        print(f"✅ Generated {question_count} strategic questions")
+        print(f"📊 Average confidence: {confidence:.2f}")
+        print(f"🎯 Based on {len(state.get('key_insights', []))} key insights")
     
     return {
-        "exhausted_topics": [current_topic],
-        "topic_questions": [{
-            "topic": current_topic,
-            "questions": topic_questions,
-            "evidence_sources": complete_evidence
-        }],
-        "progress_log": [progress_update],
-        "current_status": f"Generated {len(topic_questions)} questions for '{current_topic}'. Continuing research on remaining topics."
-    }
+        "final_questions": questions,
+        "question_readiness": True
+    } 
 
-async def final_compilation(state: DepositionAgentState, config: RunnableConfig):
-    """Organize and order all questions into logical deposition flow"""
-    
-    all_topic_questions = state["topic_questions"]
-    case_background = state["case_background"]
-    
-    # Progress update
-    progress_update = "Organizing all questions into strategic deposition sequence with source citations."
-    
-    # Simple organization by topic - no complex logic
-    organized_questions = []
-    for topic_set in all_topic_questions:
-        organized_questions.append({
-            "topic": topic_set["topic"],
-            "questions": topic_set["questions"],
-            "question_count": len(topic_set["questions"]),
-            "evidence_count": len(topic_set.get("evidence_sources", []))
-        })
-    
-    # Calculate totals
-    total_questions = sum(len(tq["questions"]) for tq in all_topic_questions)
-    
-    return {
-        "final_questions": organized_questions,
-        "progress_log": [progress_update],
-        "current_status": f"Deposition outline complete! Generated {total_questions} strategic questions across {len(all_topic_questions)} key topics."
-    }
-
-# Graph construction
-
-# Create the graph
+# Create simplified but intelligent graph
 deposition_agent = StateGraph(
     DepositionAgentState, 
     input=DepositionAgentInput, 
@@ -450,64 +589,26 @@ deposition_agent = StateGraph(
     config_schema=Configuration
 )
 
-# Add nodes
-deposition_agent.add_node("initial_research", initial_research)
-deposition_agent.add_node("discovery_loop", discovery_loop) 
-deposition_agent.add_node("final_compilation", final_compilation)
+# Add the new intelligent nodes
+deposition_agent.add_node("initial_investigation", initial_investigation)
+deposition_agent.add_node("adaptive_researcher", adaptive_researcher) 
+deposition_agent.add_node("question_compiler", question_compiler)
 
-# Add edges
-deposition_agent.add_edge(START, "initial_research")
+# Simple but adaptive routing
+deposition_agent.add_edge(START, "initial_investigation")
+deposition_agent.add_edge("initial_investigation", "adaptive_researcher")
 
-# Conditional edge from initial_research
+# AI-driven routing - the AI decides what to do next
 deposition_agent.add_conditional_edges(
-    "initial_research",
-    lambda state: state["current_research_phase"],
+    "adaptive_researcher",
+    route_by_ai_decision,
     {
-        "discovery_loop": "discovery_loop",
-        "compilation": "final_compilation"  # If no findings
+        "continue_research": "adaptive_researcher",  # Self-loop for continued research
+        "generate_questions": "question_compiler"     # AI decides it's ready for questions
     }
 )
 
-# Self-loop for discovery until exhausted
-deposition_agent.add_conditional_edges(
-    "discovery_loop", 
-    lambda state: state["current_research_phase"],
-    {
-        "discovery_loop": "discovery_loop",  # Continue processing
-        "compilation": "final_compilation"   # Done with discovery
-    }
-)
+deposition_agent.add_edge("question_compiler", END)
 
-deposition_agent.add_edge("final_compilation", END)
-
-# Compile the graph
+# Compile the intelligent graph
 deposition_graph = deposition_agent.compile()
-
-# Utility function for running with progress display
-async def run_deposition_agent_with_display(case_background: str, config: RunnableConfig):
-    """Run the agent with real-time progress display like Manus"""
-    
-    input_data = {"case_background": case_background}
-    
-    print("🎯 Deposition Question Generator")
-    print("=" * 50)
-    print(f"Case: {case_background[:100]}...")
-    print()
-    
-    final_result = None
-    
-    # Stream the execution
-    async for chunk in deposition_graph.astream(input_data, config):
-        for node_name, node_output in chunk.items():
-            if "progress_log" in node_output:
-                for progress in node_output["progress_log"]:
-                    print(f"🔍 {progress}")
-            
-            if "current_status" in node_output:
-                print(f"📊 {node_output['current_status']}")
-                print()
-            
-            if "final_questions" in node_output:
-                final_result = node_output["final_questions"]
-    
-    return final_result 

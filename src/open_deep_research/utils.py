@@ -48,7 +48,7 @@ from langsmith import traceable
 
 from open_deep_research.state import Section
 
-MAX_RESULTS_PER_QUERY = 10
+MAX_RESULTS_PER_QUERY = 100
     
 def get_config_value(value):
     """
